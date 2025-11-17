@@ -1,4 +1,5 @@
 using Godot;
+using VoxelPath.Scripts.Blocks;
 
 namespace VoxelPath.Scenes.Player;
 
@@ -12,6 +13,9 @@ public partial class Player : CharacterBody3D
     [Export] public float FallGravityMultiplier = 2.0f;
     [Export] public float JumpInputBufferTime = 0.2f;
     [Export] public float CoyoteTime = 0.1f;
+    [Export(PropertyHint.Range, "1,12,0.1")] public float InteractDistance = 6.0f;
+    [Export] public NodePath WorldNodePath;
+    [Export] public BlockType PlacementBlockType = BlockType.Stone;
 
     // 飞行相关
     [Export] public float DoubleTapTime = 0.3f;
@@ -32,6 +36,9 @@ public partial class Player : CharacterBody3D
     private bool _waitingForDoubleTap = false;
     private double _doubleTapTimer = 0;
     private bool _isFlying = false;
+    private RayCast3D _interactionRay;
+    private World _world;
+    public int CurrentPlacementClusterSize { get; private set; } = BlockMetrics.DefaultClusterSize;
 
     public override void _EnterTree()
     {
@@ -44,6 +51,9 @@ public partial class Player : CharacterBody3D
     {
         _cameraPivot = GetNode<Node3D>("CameraPivot");
         _camera = _cameraPivot.GetNode<Camera3D>("Camera3D");
+        _interactionRay = _camera.GetNodeOrNull<RayCast3D>("RayCast3D");
+        SetupInteractionRay();
+        ResolveWorldReference();
         Input.MouseMode = Input.MouseModeEnum.Captured;
     }
 
@@ -102,10 +112,24 @@ public partial class Player : CharacterBody3D
             rot.X = Mathf.Clamp(rot.X, Mathf.DegToRad(-MaxPitchDegrees), Mathf.DegToRad(MaxPitchDegrees));
             _cameraPivot.Rotation = rot;
         }
+
+        if (@event is InputEventMouseButton mouseButton && mouseButton.Pressed &&
+            Input.MouseMode == Input.MouseModeEnum.Captured)
+        {
+            if (mouseButton.ButtonIndex == MouseButton.Left)
+            {
+                HandleBlockBreak();
+            }
+            else if (mouseButton.ButtonIndex == MouseButton.Right)
+            {
+                HandleBlockPlace();
+            }
+        }
     }
 
     public override void _PhysicsProcess(double delta)
     {
+        UpdatePlacementClusterSize();
         var v = Velocity;
 
         // 双击计时器更新
@@ -228,6 +252,14 @@ public partial class Player : CharacterBody3D
         _wasOnFloor = IsOnFloor();
     }
 
+    private void UpdatePlacementClusterSize()
+    {
+        int newSize = Input.IsActionPressed("sprint")
+            ? BlockMetrics.LargeClusterSize
+            : BlockMetrics.DefaultClusterSize;
+        CurrentPlacementClusterSize = newSize;
+    }
+
     private void SetupInputMap()
     {
         EnsureKeyBinding("move_forward", Key.W);
@@ -239,6 +271,9 @@ public partial class Player : CharacterBody3D
 
         if (EnableFlyDownAction)
             EnsureKeyBinding("fly_down", Key.Shift);
+
+    EnsureMouseBinding("block_break", MouseButton.Left);
+    EnsureMouseBinding("block_place", MouseButton.Right);
     }
 
     private void EnsureKeyBinding(string action, Key key)
@@ -261,5 +296,80 @@ public partial class Player : CharacterBody3D
             var e = new InputEventKey { PhysicalKeycode = key };
             InputMap.ActionAddEvent(action, e);
         }
+    }
+
+    private void EnsureMouseBinding(string action, MouseButton button)
+    {
+        if (!InputMap.HasAction(action))
+            InputMap.AddAction(action);
+
+        bool exists = false;
+        foreach (var evt in InputMap.ActionGetEvents(action))
+        {
+            if (evt is InputEventMouseButton mouseEvt && mouseEvt.ButtonIndex == button)
+            {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists)
+        {
+            var mouseEvent = new InputEventMouseButton { ButtonIndex = button };
+            InputMap.ActionAddEvent(action, mouseEvent);
+        }
+    }
+
+    private void ResolveWorldReference()
+    {
+        if (WorldNodePath != null && !WorldNodePath.IsEmpty)
+            _world = GetNodeOrNull<World>(WorldNodePath);
+
+        _world ??= GetNodeOrNull<World>("../World");
+        _world ??= GetNodeOrNull<World>("../../World");
+        _world ??= GetTree().Root.GetNodeOrNull<World>("World");
+    }
+
+    private void SetupInteractionRay()
+    {
+        if (_interactionRay == null) return;
+
+        _interactionRay.TargetPosition = new Vector3(0, 0, -InteractDistance);
+        _interactionRay.CollideWithAreas = false;
+        _interactionRay.CollideWithBodies = true;
+        _interactionRay.ExcludeParent = true;
+        _interactionRay.AddException(this);
+        _interactionRay.Enabled = true;
+    }
+
+    private bool TryGetRayHit(out Vector3 hitPoint, out Vector3 hitNormal)
+    {
+        hitPoint = default;
+        hitNormal = default;
+
+        if (_interactionRay == null || !_interactionRay.IsColliding())
+            return false;
+
+        hitPoint = _interactionRay.GetCollisionPoint();
+        hitNormal = _interactionRay.GetCollisionNormal();
+        return true;
+    }
+
+    private void HandleBlockBreak()
+    {
+        if (_world == null) return;
+        if (!TryGetRayHit(out var hitPoint, out var hitNormal)) return;
+
+        var targetPoint = hitPoint - hitNormal * 0.05f;
+        _world.TryBreakCluster(targetPoint, CurrentPlacementClusterSize);
+    }
+
+    private void HandleBlockPlace()
+    {
+        if (_world == null) return;
+        if (!TryGetRayHit(out var hitPoint, out var hitNormal)) return;
+
+        var targetPoint = hitPoint + hitNormal * 0.05f;
+        _world.TryPlaceCluster(targetPoint, CurrentPlacementClusterSize, PlacementBlockType);
     }
 }

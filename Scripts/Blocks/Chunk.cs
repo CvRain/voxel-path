@@ -8,7 +8,7 @@ public class Chunk
     public const int SizeY = 64;
     public const int SizeZ = 64;
 
-    private readonly MacroBlockData[,,] _blocks = new MacroBlockData[SizeX, SizeY, SizeZ];
+    private readonly BlockType[,,] _blocks = new BlockType[SizeX, SizeY, SizeZ];
     public Vector3I ChunkCoord;
 
     public bool DirtyMesh = true;
@@ -16,67 +16,36 @@ public class Chunk
     public Chunk(Vector3I coord)
     {
         ChunkCoord = coord;
-        // 初始化：简单地在 y==0 做一层 Dirt，其它空气
+        // 默认填充空气即可
         for (int x = 0; x < SizeX; x++)
         {
             for (int y = 0; y < SizeY; y++)
             {
                 for (int z = 0; z < SizeZ; z++)
                 {
-                    ushort id = (ushort)(y == 0 ? BlockType.Dirt : BlockType.Air);
-                    _blocks[x, y, z] = new MacroBlockData(id);
+                    _blocks[x, y, z] = BlockType.Air;
                 }
             }
         }
     }
 
-    public MacroBlockData Get(int x, int y, int z)
+    public bool InBounds(int x, int y, int z)
     {
-        if (x < 0 || y < 0 || z < 0 || x >= SizeX || y >= SizeY || z >= SizeZ) return null;
+        return x >= 0 && x < SizeX && y >= 0 && y < SizeY && z >= 0 && z < SizeZ;
+    }
+
+    public BlockType Get(int x, int y, int z)
+    {
+        if (!InBounds(x, y, z)) return BlockType.Air;
         return _blocks[x, y, z];
     }
 
-    public void Set(int x, int y, int z, BlockType type)
+    public bool Set(int x, int y, int z, BlockType type)
     {
-        if (x < 0 || y < 0 || z < 0 || x >= SizeX || y >= SizeY || z >= SizeZ) return;
-        _blocks[x, y, z].BlockId = (ushort)type;
-        _blocks[x, y, z].Micro = null;
+        if (!InBounds(x, y, z)) return false;
+        if (_blocks[x, y, z] == type) return false;
+        _blocks[x, y, z] = type;
         DirtyMesh = true;
-    }
-
-    public void Subdivide(int x, int y, int z)
-    {
-        var b = Get(x, y, z);
-        if (b == null) return;
-        b.Subdivide();
-        DirtyMesh = true;
-    }
-
-    public void SetMicro(int x, int y, int z, int mx, int my, int mz, BlockType type)
-    {
-        var b = Get(x, y, z);
-        if (b == null) return;
-        if (!b.IsSubdivided) b.Subdivide();
-        b.Micro.Set(mx, my, mz, (byte)type);
-        b.TryCollapse();
-        DirtyMesh = true;
-    }
-
-    public void RemoveMicro(int x, int y, int z, int mx, int my, int mz)
-    {
-        var b = Get(x, y, z);
-        if (b == null || !b.IsSubdivided) return;
-        b.Micro.Remove(mx, my, mz);
-        if (b.Micro.Occupancy == 0UL)
-        {
-            b.BlockId = (ushort)BlockType.Air;
-            b.Micro = null;
-        }
-        else
-        {
-            b.TryCollapse();
-        }
-
-        DirtyMesh = true;
+        return true;
     }
 }

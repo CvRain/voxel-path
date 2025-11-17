@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="VoxelPath"
-run/main_scene="uid://jf6dn7tgufk5"
+run/main_scene="uid://cp8nj6k0upfnk"
 config/features=PackedStringArray("4.5", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 

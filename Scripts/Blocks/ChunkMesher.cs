@@ -4,6 +4,7 @@ namespace VoxelPath.Scripts.Blocks;
 
 public static class ChunkMesher
 {
+    private const int TextureSubtileDivisions = BlockMetrics.BlocksPerMeter;
     private static readonly Vector3[] FaceNormals =
     [
         Vector3.Right, Vector3.Left,
@@ -13,17 +14,24 @@ public static class ChunkMesher
 
     private static readonly Vector3[][] FaceVertices =
     [
-        [new Vector3(1, 0, 0), new Vector3(1, 1, 0), new Vector3(1, 1, 1), new Vector3(1, 0, 1)], // +X
-        [new Vector3(0, 0, 1), new Vector3(0, 1, 1), new Vector3(0, 1, 0), new Vector3(0, 0, 0)], // -X
-        [new Vector3(0, 1, 0), new Vector3(1, 1, 0), new Vector3(1, 1, 1), new Vector3(0, 1, 1)], // +Y
-        [new Vector3(0, 0, 1), new Vector3(1, 0, 1), new Vector3(1, 0, 0), new Vector3(0, 0, 0)], // -Y
-        [new Vector3(0, 0, 1), new Vector3(0, 1, 1), new Vector3(1, 1, 1), new Vector3(1, 0, 1)], // +Z
-        [new Vector3(1, 0, 0), new Vector3(1, 1, 0), new Vector3(0, 1, 0), new Vector3(0, 0, 0)] // -Z
+        // +X
+        [new Vector3(1, 0, 0), new Vector3(1, 1, 0), new Vector3(1, 1, 1), new Vector3(1, 0, 1)],
+        // -X
+        [new Vector3(0, 0, 1), new Vector3(0, 1, 1), new Vector3(0, 1, 0), new Vector3(0, 0, 0)],
+        // +Y
+        [new Vector3(0, 1, 1), new Vector3(1, 1, 1), new Vector3(1, 1, 0), new Vector3(0, 1, 0)],
+        // -Y
+        [new Vector3(0, 0, 0), new Vector3(1, 0, 0), new Vector3(1, 0, 1), new Vector3(0, 0, 1)],
+        // +Z
+        [new Vector3(0, 0, 1), new Vector3(1, 0, 1), new Vector3(1, 1, 1), new Vector3(0, 1, 1)],
+        // -Z
+        [new Vector3(1, 0, 0), new Vector3(0, 0, 0), new Vector3(0, 1, 0), new Vector3(1, 1, 0)]
     ];
 
-    private static readonly int[] TriangleOrder = { 0, 1, 2, 0, 2, 3 };
+    private static readonly int[] TriangleOrder = { 0, 2, 1, 0, 3, 2 };
 
-    public static Mesh BuildMesh(Chunk chunk, BlockAtlas atlas, Material opaqueMaterial, Material transparentMaterial)
+    public static Mesh BuildMesh(Chunk chunk, Vector3I chunkCoord, BlockAtlas atlas,
+        Material opaqueMaterial, Material transparentMaterial)
     {
         var arrayMesh = new ArrayMesh();
         var stOpaque = new SurfaceTool();
@@ -38,31 +46,23 @@ public static class ChunkMesher
             for (int y = 0; y < Chunk.SizeY; y++)
                 for (int z = 0; z < Chunk.SizeZ; z++)
                 {
-                    var block = chunk.Get(x, y, z);
-                    if (block == null) continue;
-                    if ((BlockType)block.BlockId == BlockType.Air) continue;
+                    var blockType = chunk.Get(x, y, z);
+                    if (blockType == BlockType.Air) continue;
 
-                    var def = BlockRegistry.Get((BlockType)block.BlockId);
+                    var def = BlockRegistry.Get(blockType);
                     var st = def.IsTransparent ? stTransparent : stOpaque;
+                    Vector3 basePos = new Vector3(x, y, z) * BlockMetrics.StandardBlockSize;
+                    int subX = 0;
+                    int subY = 0;
+                    if (def.UseRandomSubtiles)
+                    {
+                        var offsets = GetBlockSubtile(chunkCoord, x, y, z);
+                        subX = offsets.X;
+                        subY = offsets.Y;
+                    }
 
-                    if (!block.IsSubdivided)
-                    {
-                        AddMacroBlock(st, atlas, chunk, x, y, z, block);
-                    }
-                    else
-                    {
-                        for (int mx = 0; mx < 4; mx++)
-                            for (int my = 0; my < 4; my++)
-                                for (int mz = 0; mz < 4; mz++)
-                                {
-                                    if (!block.Micro.Has(mx, my, mz)) continue;
-                                    byte t = block.Micro.Types[MicroBlockData.ToIndex(mx, my, mz)];
-                                    var microDef = BlockRegistry.Get((BlockType)t);
-                                    var microSt = microDef.IsTransparent ? stTransparent : stOpaque;
-                                    Vector3 basePos = new Vector3(x, y, z) + new Vector3(mx, my, mz) * 0.25f;
-                                    AddCube(microSt, atlas, basePos, 0.25f, microDef, null);
-                                }
-                    }
+                    AddCube(st, atlas, basePos, BlockMetrics.StandardBlockSize, def, subX, subY,
+                        face => ShouldDrawFace(chunk, x, y, z, face, def));
                 }
 
         stOpaque.GenerateNormals();
@@ -72,13 +72,6 @@ public static class ChunkMesher
         stTransparent.Commit(arrayMesh);
 
         return arrayMesh;
-    }
-
-    private static void AddMacroBlock(SurfaceTool st, BlockAtlas atlas, Chunk chunk, int x, int y, int z,
-        MacroBlockData block)
-    {
-        var def = BlockRegistry.Get((BlockType)block.BlockId);
-        AddCube(st, atlas, new Vector3(x, y, z), 1f, def, face => ShouldDrawFace(chunk, x, y, z, face, def));
     }
 
     private static bool ShouldDrawFace(Chunk chunk, int x, int y, int z, int face, BlockDefinition def)
@@ -94,12 +87,10 @@ public static class ChunkMesher
             case 5: nz--; break;
         }
 
-        if (nx < 0 || nx >= Chunk.SizeX || ny < 0 || ny >= Chunk.SizeY || nz < 0 || nz >= Chunk.SizeZ)
+        if (!chunk.InBounds(nx, ny, nz))
             return true;
 
-        var neighbor = chunk.Get(nx, ny, nz);
-        if (neighbor == null) return true;
-        var neighborType = (BlockType)neighbor.BlockId;
+        var neighborType = chunk.Get(nx, ny, nz);
         if (neighborType == BlockType.Air) return true;
 
         var neighborDef = BlockRegistry.Get(neighborType);
@@ -110,7 +101,7 @@ public static class ChunkMesher
     }
 
     private static void AddCube(SurfaceTool st, BlockAtlas atlas, Vector3 basePos, float size,
-        BlockDefinition def, System.Func<int, bool> shouldDrawFace)
+        BlockDefinition def, int subX, int subY, System.Func<int, bool> shouldDrawFace)
     {
         for (int face = 0; face < 6; face++)
         {
@@ -118,7 +109,12 @@ public static class ChunkMesher
                 continue;
 
             int atlasIndex = def.FaceAtlasIndices[face];
-            atlas.GetTileUv(atlasIndex, out Vector2 uvMin, out Vector2 uvMax);
+            Vector2 uvMin;
+            Vector2 uvMax;
+            if (def.UseRandomSubtiles)
+                atlas.GetTileUvSubRegion(atlasIndex, TextureSubtileDivisions, subX, subY, out uvMin, out uvMax);
+            else
+                atlas.GetTileUv(atlasIndex, out uvMin, out uvMax);
 
             var vtx = FaceVertices[face];
             var normal = FaceNormals[face];
@@ -145,33 +141,26 @@ public static class ChunkMesher
     {
         switch (face)
         {
-            case 0: // +X
-                u = p.Z;
-                v = p.Y;
+            case 0: // +X 面：U=Z, V=1-Y（保持顶部朝上）
+                u = p.Z; v = 1f - p.Y;
                 break;
-            case 1: // -X
-                u = 1f - p.Z;
-                v = p.Y;
+            case 1: // -X 面：U=1-Z, V=1-Y（水平翻转 + 顶部向上）
+                u = 1f - p.Z; v = 1f - p.Y;
                 break;
-            case 2: // +Y (Top)
-                u = p.X;
-                v = 1f - p.Z;
+            case 2: // +Y 面：U=X, V=1-Z（让顶部看起来与 +Z 面方向一致）
+                u = p.X; v = 1f - p.Z;
                 break;
-            case 3: // -Y (Bottom)
-                u = p.X;
-                v = p.Z;
+            case 3: // -Y 面：U=X, V=Z
+                u = p.X; v = p.Z;
                 break;
-            case 4: // +Z (Front)
-                u = p.X;
-                v = p.Y;
+            case 4: // +Z 面：U=X, V=1-Y
+                u = p.X; v = 1f - p.Y;
                 break;
-            case 5: // -Z (Back)
-                u = 1f - p.X;
-                v = p.Y;
+            case 5: // -Z 面：U=1-X, V=1-Y（Godot 默认面向 -Z，即玩家视角正面，应保持纹理朝上）
+                u = 1f - p.X; v = 1f - p.Y;
                 break;
             default:
-                u = p.X;
-                v = p.Y;
+                u = p.X; v = p.Y;
                 break;
         }
     }
@@ -182,5 +171,24 @@ public static class ChunkMesher
         GD.Print($"Face order(+X,-X,+Y,-Y,+Z,-Z) indices: " +
                  $"{def.FaceAtlasIndices[0]}, {def.FaceAtlasIndices[1]}, {def.FaceAtlasIndices[2]}, " +
                  $"{def.FaceAtlasIndices[3]}, {def.FaceAtlasIndices[4]}, {def.FaceAtlasIndices[5]}");
+    }
+
+    private static Vector2I GetBlockSubtile(Vector3I chunkCoord, int x, int y, int z)
+    {
+        unchecked
+        {
+            uint hash = 2166136261u;
+            hash = (hash ^ (uint)chunkCoord.X) * 16777619u;
+            hash = (hash ^ (uint)chunkCoord.Y) * 16777619u;
+            hash = (hash ^ (uint)chunkCoord.Z) * 16777619u;
+            hash = (hash ^ (uint)x) * 16777619u;
+            hash = (hash ^ (uint)y) * 16777619u;
+            hash = (hash ^ (uint)z) * 16777619u;
+
+            int subX = (int)(hash % (uint)TextureSubtileDivisions);
+            hash = (hash ^ 0x9e3779b9u) * 16777619u;
+            int subY = (int)(hash % (uint)TextureSubtileDivisions);
+            return new Vector2I(subX, subY);
+        }
     }
 }

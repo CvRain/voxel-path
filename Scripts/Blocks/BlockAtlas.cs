@@ -12,6 +12,8 @@ public partial class BlockAtlas : Node
     [Export] public string OakLogPath = "res://Assets/Blocks/oak_log.png";
     [Export] public string OakLogTopPath = "res://Assets/Blocks/oak_log_top.png";
     [Export] public string OakLeavesPath = "res://Assets/Blocks/oak_leaves.png";
+    [Export] public string StonePath = "res://Assets/Blocks/stone.png";
+    [Export] public string CobblestonePath = "res://Assets/Blocks/cobblestone.png";
 
     // 草方块和树叶的颜色（参考 Minecraft）
     [Export] public Color GrassColor = new Color(0.49f, 0.78f, 0.33f); // 草绿色
@@ -59,6 +61,12 @@ public partial class BlockAtlas : Node
         // 6: oak_leaves.png (灰度图需要染色)
         var oakLeaves = GD.Load<Texture2D>(OakLeavesPath).GetImage();
         _images.Add(TintGrayscaleImage(oakLeaves, OakLeavesColor));
+
+        // 7: stone.png
+        _images.Add(GD.Load<Texture2D>(StonePath).GetImage());
+
+        // 8: cobblestone.png
+        _images.Add(GD.Load<Texture2D>(CobblestonePath).GetImage());
     }
 
     /// <summary>
@@ -105,7 +113,8 @@ public partial class BlockAtlas : Node
     /// <param name="brightness">输出亮度值（0-1）</param>
     /// <param name="threshold">灰度判定阈值，RGB 差异小于此值视为灰度</param>
     /// <returns>是否为灰度像素</returns>
-    private bool IsGrayscalePixel(Color pixel, out float brightness, float threshold = 0.05f)
+    private bool IsGrayscalePixel(Color pixel, out float brightness, float absoluteThreshold = 0.025f,
+        float relativeThreshold = 0.08f)
     {
         float r = pixel.R;
         float g = pixel.G;
@@ -118,14 +127,16 @@ public partial class BlockAtlas : Node
             return false;
         }
 
-        // 计算 RGB 的标准差，判断是否接近灰度
-        float avg = (r + g + b) / 3.0f;
-        float variance = ((r - avg) * (r - avg) + (g - avg) * (g - avg) + (b - avg) * (b - avg)) / 3.0f;
+        brightness = (r + g + b) / 3.0f;
 
-        brightness = avg;
+    float maxChannel = Mathf.Max(r, Mathf.Max(g, b));
+    float minChannel = Mathf.Min(r, Mathf.Min(g, b));
+        float delta = maxChannel - minChannel;
 
-        // 方差小于阈值，认为是灰度
-        return variance < threshold;
+        // 只有在“非常低饱和度”或“相对亮度下差异极小”时才判定为灰度
+        bool lowSaturation = delta <= absoluteThreshold || delta <= brightness * relativeThreshold;
+
+        return lowSaturation;
     }
 
     private void BuildAtlas()
@@ -156,5 +167,17 @@ public partial class BlockAtlas : Node
         var v1 = (y + 1) / (float)Rows;
         uvMin = new Vector2(u0, v0);
         uvMax = new Vector2(u1, v1);
+    }
+
+    public void GetTileUvSubRegion(int index, int subdivisions, int subX, int subY,
+        out Vector2 uvMin, out Vector2 uvMax)
+    {
+        GetTileUv(index, out var tileMin, out var tileMax);
+        float stepU = (tileMax.X - tileMin.X) / Mathf.Max(1, subdivisions);
+        float stepV = (tileMax.Y - tileMin.Y) / Mathf.Max(1, subdivisions);
+        subX = Mathf.Clamp(subX, 0, Mathf.Max(0, subdivisions - 1));
+        subY = Mathf.Clamp(subY, 0, Mathf.Max(0, subdivisions - 1));
+        uvMin = new Vector2(tileMin.X + subX * stepU, tileMin.Y + subY * stepV);
+        uvMax = new Vector2(uvMin.X + stepU, uvMin.Y + stepV);
     }
 }

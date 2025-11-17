@@ -32,17 +32,25 @@ public class BlockDefinition
     public int[] FaceAtlasIndices = new int[6];
 
     /// <summary>
+    /// Whether this block should sample randomized sub-tiles from its texture.
+    /// Useful when using high-resolution textures on micro blocks.
+    /// </summary>
+    public bool UseRandomSubtiles;
+
+    /// <summary>
     /// Constructor for blocks where all faces use the same texture.
     /// </summary>
     /// <param name="type">The type of the block.</param>
     /// <param name="opaque">Whether the block is opaque.</param>
     /// <param name="canSubdivide">Whether the block can be subdivided.</param>
     /// <param name="allFacesIndex">The texture atlas index used for all faces.</param>
-    public BlockDefinition(BlockType type, bool opaque, bool canSubdivide, int allFacesIndex)
+    public BlockDefinition(BlockType type, bool opaque, bool canSubdivide, int allFacesIndex,
+        bool useRandomSubtiles = false)
     {
         Type = type;
         IsOpaque = opaque;
         CanSubdivide = canSubdivide;
+        UseRandomSubtiles = useRandomSubtiles;
         for (var i = 0; i < 6; i++)
             FaceAtlasIndices[i] = allFacesIndex;
     }
@@ -59,11 +67,14 @@ public class BlockDefinition
     /// <param name="negY">Texture atlas index for the negative Y face (-Y).</param>
     /// <param name="posZ">Texture atlas index for the positive Z face (+Z).</param>
     /// <param name="negZ">Texture atlas index for the negative Z face (-Z).</param>
-    public BlockDefinition(BlockType type, bool opaque, bool canSubdivide, int posX, int negX, int posY, int negY, int posZ, int negZ)
+    public BlockDefinition(BlockType type, bool opaque, bool canSubdivide,
+        int posX, int negX, int posY, int negY, int posZ, int negZ,
+        bool useRandomSubtiles = false)
     {
         Type = type;
         IsOpaque = opaque;
         CanSubdivide = canSubdivide;
+        UseRandomSubtiles = useRandomSubtiles;
         FaceAtlasIndices[0] = posX;
         FaceAtlasIndices[1] = negX;
         FaceAtlasIndices[2] = posY;

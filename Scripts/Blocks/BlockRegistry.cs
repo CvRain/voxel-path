@@ -7,11 +7,13 @@ public static class BlockRegistry
     // 纹理顺序（atlas 排列）:
     // 0: dirt.png
     // 1: grass_block_top.png (染色后)
-    // 2: grass_block_side.png
+    // 2: grass_block_side.png (染色后)
     // 3: grass_block_side_overlay.png (染色后)
     // 4: oak_log.png (侧面)
     // 5: oak_log_top.png (顶部和底部)
     // 6: oak_leaves.png (染色后)
+    // 7: stone.png
+    // 8: cobblestone.png
     public static readonly Dictionary<BlockType, BlockDefinition> Definitions = new();
 
     public static void Init()
@@ -31,7 +33,8 @@ public static class BlockRegistry
             BlockType.Dirt,
             opaque: true,
             canSubdivide: true,
-            allFacesIndex: 0
+            allFacesIndex: 0,
+            useRandomSubtiles: true
         );
 
         // Grass - 草方块
@@ -43,12 +46,40 @@ public static class BlockRegistry
             BlockType.Grass,
             opaque: true,
             canSubdivide: true,
-            posX: 2,  // 右侧面
-            negX: 2,  // 左侧面
-            posY: 1,  // 顶部（草地）
-            negY: 0,  // 底部（泥土）
-            posZ: 2,  // 前侧面
-            negZ: 2   // 后侧面
+            posX: 2,
+            negX: 2,
+            posY: 1,
+            negY: 0,
+            posZ: 2,
+            negZ: 2,
+            useRandomSubtiles: true
+        );
+
+        // GrassFull - 全草方块（六面同草顶纹理）
+        Definitions[BlockType.GrassFull] = new BlockDefinition(
+            BlockType.GrassFull,
+            opaque: true,
+            canSubdivide: true,
+            allFacesIndex: 1,
+            useRandomSubtiles: true
+        );
+
+        // Stone - 石头
+        Definitions[BlockType.Stone] = new BlockDefinition(
+            BlockType.Stone,
+            opaque: true,
+            canSubdivide: true,
+            allFacesIndex: 7,
+            useRandomSubtiles: true
+        );
+
+        // Cobblestone - 圆石
+        Definitions[BlockType.Cobblestone] = new BlockDefinition(
+            BlockType.Cobblestone,
+            opaque: true,
+            canSubdivide: true,
+            allFacesIndex: 8,
+            useRandomSubtiles: true
         );
 
         // OakLog - 橡木原木
@@ -72,7 +103,23 @@ public static class BlockRegistry
             BlockType.OakLeaves,
             opaque: false,
             canSubdivide: true,
-            allFacesIndex: 6
+            allFacesIndex: 6,
+            useRandomSubtiles: true
+        );
+
+        // Debug - 调试用方块
+        // 使用已有贴图集中 0~5 的索引，让每个面都不一样：
+        // +X: dirt(0), -X: grass_top(1), +Y: grass_side(2), -Y: grass_side_overlay(3), +Z: oak_log(4), -Z: oak_log_top(5)
+        Definitions[BlockType.Debug] = new BlockDefinition(
+            BlockType.Debug,
+            opaque: true,
+            canSubdivide: false,
+            posX: 0,
+            negX: 1,
+            posY: 2,
+            negY: 3,
+            posZ: 4,
+            negZ: 5
         );
     }
 

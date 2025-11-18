@@ -1,4 +1,5 @@
 using Godot;
+using Godot.Collections;
 using VoxelPath.Scripts.Blocks;
 
 namespace VoxelPath.Scenes.Player;
@@ -23,22 +24,33 @@ public partial class Player : CharacterBody3D
     [Export] public float FlightAccel = 20.0f;
     [Export] public bool EnableFlyDownAction = true;
 
+    // 自动跨越和自动跳跃
+    [Export] public bool EnableAutoStepOver = true;
+    [Export] public bool EnableAutoJump = true;
+    [Export(PropertyHint.Range, "0.1,1.0,0.05")] public float AutoStepOverHeight = 0.5f;
+    [Export(PropertyHint.Range, "0.5,2.0,0.05")] public float AutoJumpMaxHeight = 1.0f;
+    [Export(PropertyHint.Range, "0.2,2.0,0.05")] public float ObstacleDetectionDistance = 0.6f;
+
     private float _gravity;
     private Node3D _cameraPivot;
     private Camera3D _camera;
-    private bool _isJumpPressed = false;
-    private bool _isJumpHeld = false;
-    private double _jumpInputBufferTimer = 0;
-    private double _coyoteTimer = 0;
-    private bool _wasOnFloor = false;
+    private bool _isJumpPressed;
+    private bool _isJumpHeld;
+    private double _jumpInputBufferTimer;
+    private double _coyoteTimer;
+    private bool _wasOnFloor;
 
     // 双击空格检测
-    private bool _waitingForDoubleTap = false;
-    private double _doubleTapTimer = 0;
-    private bool _isFlying = false;
+    private bool _waitingForDoubleTap;
+    private double _doubleTapTimer;
+    private bool _isFlying;
+    private bool _autoJumpTriggered;
     private RayCast3D _interactionRay;
     private World _world;
     public int CurrentPlacementClusterSize { get; private set; } = BlockMetrics.DefaultClusterSize;
+    private CollisionShape3D _collisionShape;
+    private float _feetOffset = -1.0f;
+    private float _bodyRadius = 0.4f;
 
     public override void _EnterTree()
     {
@@ -52,11 +64,14 @@ public partial class Player : CharacterBody3D
         _cameraPivot = GetNode<Node3D>("CameraPivot");
         _camera = _cameraPivot.GetNode<Camera3D>("Camera3D");
         _interactionRay = _camera.GetNodeOrNull<RayCast3D>("RayCast3D");
+        CacheCollisionShapeMetrics();
         SetupInteractionRay();
         ResolveWorldReference();
         Input.MouseMode = Input.MouseModeEnum.Captured;
-    }
 
+        // 增加滑动次数以更好地处理方块碰撞
+        MaxSlides = 6;
+    }
     public override void _Input(InputEvent @event)
     {
         if (Input.IsActionJustPressed("ui_cancel"))
@@ -69,6 +84,7 @@ public partial class Player : CharacterBody3D
         // 双击空格检测并切换飞行模式
         if (Input.IsActionJustPressed("jump"))
         {
+            // 检查是否是双击
             if (_waitingForDoubleTap && _doubleTapTimer > 0)
             {
                 // 双击：切换飞行
@@ -80,22 +96,25 @@ public partial class Player : CharacterBody3D
                 _isJumpPressed = false;
                 _jumpInputBufferTimer = 0;
                 _coyoteTimer = 0;
+                _autoJumpTriggered = false;
             }
-            else
+            else if (!_autoJumpTriggered)
             {
+                // 开始双击计时（不限制是否在地面）
                 _waitingForDoubleTap = true;
                 _doubleTapTimer = DoubleTapTime;
             }
 
             // 正常跳跃输入只在非飞行模式下被捕获
-            if (!_isFlying)
+            if (!_isFlying && !_autoJumpTriggered)
             {
                 _isJumpPressed = true;
                 _isJumpHeld = true;
             }
-        }
 
-        // 检查跳跃释放
+            // 重置自动跳跃标记
+            _autoJumpTriggered = false;
+        }        // 检查跳跃释放
         if (Input.IsActionJustReleased("jump"))
         {
             _isJumpHeld = false;
@@ -146,7 +165,6 @@ public partial class Player : CharacterBody3D
         // 飞行模式逻辑
         if (_isFlying)
         {
-            // 水平输入（保留原移动逻辑）
             Vector2 input = Input.GetVector("move_left", "move_right", "move_back", "move_forward");
             Vector3 forward = -GlobalTransform.Basis.Z;
             Vector3 right = GlobalTransform.Basis.X;
@@ -158,10 +176,10 @@ public partial class Player : CharacterBody3D
             const float accel = 12f;
             const float deaccel = 16f;
             Vector3 target = dir * curSpeed;
-            v.X = Mathf.MoveToward(v.X, target.X, (dir == Vector3.Zero ? deaccel : accel) * (float)delta);
-            v.Z = Mathf.MoveToward(v.Z, target.Z, (dir == Vector3.Zero ? deaccel : accel) * (float)delta);
+            float blend = (dir == Vector3.Zero ? deaccel : accel) * (float)delta;
+            v.X = Mathf.MoveToward(v.X, target.X, blend);
+            v.Z = Mathf.MoveToward(v.Z, target.Z, blend);
 
-            // 垂直控制：space 上升，fly_down 下降
             float verticalTarget = 0f;
             if (Input.IsActionPressed("jump"))
                 verticalTarget = FlightVerticalSpeed;
@@ -247,6 +265,13 @@ public partial class Player : CharacterBody3D
         v.Z = Mathf.MoveToward(v.Z, target2.Z, (dir2 == Vector3.Zero ? deaccel2 : accel2) * (float)delta);
 
         Velocity = v;
+
+        // 在移动前处理自动跨越和自动跳跃（仅在地面且有移动输入时）
+        if (IsOnFloor() && dir2.LengthSquared() > 0.01f)
+        {
+            HandleAutoStepAndJump(dir2);
+        }
+
         MoveAndSlide();
 
         _wasOnFloor = IsOnFloor();
@@ -272,8 +297,8 @@ public partial class Player : CharacterBody3D
         if (EnableFlyDownAction)
             EnsureKeyBinding("fly_down", Key.Shift);
 
-    EnsureMouseBinding("block_break", MouseButton.Left);
-    EnsureMouseBinding("block_place", MouseButton.Right);
+        EnsureMouseBinding("block_break", MouseButton.Left);
+        EnsureMouseBinding("block_place", MouseButton.Right);
     }
 
     private void EnsureKeyBinding(string action, Key key)
@@ -340,6 +365,108 @@ public partial class Player : CharacterBody3D
         _interactionRay.ExcludeParent = true;
         _interactionRay.AddException(this);
         _interactionRay.Enabled = true;
+    }
+
+    private void CacheCollisionShapeMetrics()
+    {
+        _collisionShape = GetNodeOrNull<CollisionShape3D>("CollisionShape3D");
+        _bodyRadius = 0.4f;
+        _feetOffset = -1.0f;
+
+        if (_collisionShape?.Shape is CapsuleShape3D capsule)
+        {
+            _bodyRadius = capsule.Radius;
+            _feetOffset = -(capsule.Height * 0.5f + capsule.Radius);
+        }
+        else if (_collisionShape?.Shape is CylinderShape3D cylinder)
+        {
+            _bodyRadius = cylinder.Radius;
+            _feetOffset = -(cylinder.Height * 0.5f + cylinder.Radius);
+        }
+        else if (_collisionShape?.Shape is BoxShape3D box)
+        {
+            _bodyRadius = Mathf.Max(box.Size.X, box.Size.Z) * 0.5f;
+            _feetOffset = -(box.Size.Y * 0.5f);
+        }
+    }
+
+    private float GetFeetLevel()
+    {
+        return GlobalPosition.Y + _feetOffset;
+    }
+
+    private void HandleAutoStepAndJump(Vector3 moveDirection)
+    {
+        if (!EnableAutoStepOver && !EnableAutoJump)
+            return;
+
+        if (!TryGetObstacleHeight(moveDirection, out float estimatedHeight))
+            return;
+
+        if (estimatedHeight <= 0.05f || estimatedHeight > AutoJumpMaxHeight)
+            return;
+
+        if (EnableAutoStepOver && estimatedHeight <= AutoStepOverHeight)
+        {
+            var v = Velocity;
+            float upwardVelocity = estimatedHeight <= 0.3f ? 2.4f : 3.6f;
+            v.Y = Mathf.Max(v.Y, upwardVelocity);
+            Velocity = v;
+            return;
+        }
+
+        if (EnableAutoJump && estimatedHeight > AutoStepOverHeight && estimatedHeight <= AutoJumpMaxHeight)
+        {
+            if (IsOnFloor() && Velocity.Y <= 0)
+            {
+                var v = Velocity;
+                v.Y = JumpVelocity;
+                Velocity = v;
+                _autoJumpTriggered = true;
+                _waitingForDoubleTap = false;
+                _doubleTapTimer = 0;
+            }
+        }
+    }
+
+    private bool TryGetObstacleHeight(Vector3 moveDirection, out float estimatedHeight)
+    {
+        estimatedHeight = 0f;
+
+        Vector3 planarDirection = new(moveDirection.X, 0, moveDirection.Z);
+        if (planarDirection.LengthSquared() < 1e-4f)
+            return false;
+
+        var space = GetWorld3D()?.DirectSpaceState;
+        if (space == null)
+            return false;
+
+        Vector3 checkDir = planarDirection.Normalized();
+        float probeHeight = Mathf.Max(BlockMetrics.StandardBlockSize * 2f, _bodyRadius * 0.75f);
+        Vector3 horizontalRayStart = GlobalPosition + Vector3.Up * probeHeight;
+        Vector3 horizontalRayEnd = horizontalRayStart + checkDir * (ObstacleDetectionDistance + _bodyRadius + 0.05f);
+
+        var exclude = new Array<Rid> { GetRid() };
+        var horizontalParams = PhysicsRayQueryParameters3D.Create(horizontalRayStart, horizontalRayEnd);
+        horizontalParams.Exclude = exclude;
+        var forwardHit = space.IntersectRay(horizontalParams);
+        if (!forwardHit.TryGetValue("position", out Variant forwardPosition))
+            return false;
+
+        float feetLevel = GetFeetLevel();
+        Vector3 contactPoint = (Vector3)forwardPosition;
+        Vector3 downRayStart = new(contactPoint.X, feetLevel + AutoJumpMaxHeight + 0.2f, contactPoint.Z);
+        Vector3 downRayEnd = new(contactPoint.X, feetLevel - 0.1f, contactPoint.Z);
+
+        var downParams = PhysicsRayQueryParameters3D.Create(downRayStart, downRayEnd);
+        downParams.Exclude = exclude;
+        var downHit = space.IntersectRay(downParams);
+        if (!downHit.TryGetValue("position", out Variant downPosition))
+            return false;
+
+        estimatedHeight = ((Vector3)downPosition).Y - feetLevel;
+        estimatedHeight = Mathf.Ceil(Mathf.Max(0f, estimatedHeight) / BlockMetrics.StandardBlockSize) * BlockMetrics.StandardBlockSize;
+        return estimatedHeight > 0.05f;
     }
 
     private bool TryGetRayHit(out Vector3 hitPoint, out Vector3 hitNormal)

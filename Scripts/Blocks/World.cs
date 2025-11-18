@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Godot;
 
 namespace VoxelPath.Scripts.Blocks;
@@ -10,7 +13,7 @@ public partial class World : Node3D
     [Export] public NodePath PlayerNodePath;
     [Export] public Vector2I SpawnChunkCoord = Vector2I.Zero;
     [Export] public bool UsePlayerInitialPositionAsSpawn = true;
-    [Export(PropertyHint.Range, "1,12,1")] public int ChunkGridSize = 4;
+    [Export(PropertyHint.Range, "2,16,1")] public int ViewDistance = 8;
     [Export(PropertyHint.Range, "1,6,1")] public int VerticalChunkCount = 2;
     [Export(PropertyHint.Range, "4,80,1")] public int BaseHeight = 20;
     [Export(PropertyHint.Range, "4,64,1")] public int HeightAmplitude = 16;
@@ -25,8 +28,13 @@ public partial class World : Node3D
     [Export(PropertyHint.Range, "2,10,1")] public int TreeSpacingMeters = 4;
     private BlockAtlas _atlas;
 
-    private readonly Dictionary<Vector3I, Chunk> _chunks = new();
-    private readonly Dictionary<Vector3I, StaticBody3D> _chunkBodies = new();
+    private readonly ConcurrentDictionary<Vector3I, Chunk> _chunks = new();
+    private readonly ConcurrentDictionary<Vector3I, StaticBody3D> _chunkBodies = new();
+    private readonly ConcurrentQueue<Vector3I> _chunksToLoad = new();
+    private readonly ConcurrentQueue<Vector3I> _chunksToMesh = new();
+    private readonly ConcurrentQueue<(Vector3I, Mesh)> _meshesToBuild = new();
+    private readonly HashSet<Vector3I> _loadingOrMeshing = new();
+
     private Material _opaqueMaterial;
     private Material _transparentMaterial;
     private Node3D _player;
@@ -35,6 +43,10 @@ public partial class World : Node3D
     private FastNoiseLite _detailNoise;
     private FastNoiseLite _treeNoise;
     private RandomNumberGenerator _rng;
+    private Thread _generationThread;
+    private CancellationTokenSource _cancellationSource;
+    private Vector2I _lastPlayerChunkPos = new(int.MaxValue, int.MaxValue);
+
     private const int SoilDepthClusters = 3;
     private const int CobbleDepthClusters = 6;
     private int ChunkHeightClusters => Mathf.Max(1, Chunk.SizeY / BlockMetrics.ClusterBlockLength);
@@ -48,7 +60,7 @@ public partial class World : Node3D
             _player = GetNode<Node3D>(PlayerNodePath);
         else
             _player = GetNodeOrNull<Node3D>("Player");
-    GenerationClusterSize = NormalizeClusterSize(GenerationClusterSize, true);
+        GenerationClusterSize = NormalizeClusterSize(GenerationClusterSize, true);
         _rng = new RandomNumberGenerator();
         _rng.Randomize();
 
@@ -89,7 +101,6 @@ public partial class World : Node3D
             FractalGain = 0.5f
         };
 
-        // 不透明方块材质 - 使用 AlphaScissor 模式，开启深度写入
         _opaqueMaterial = new StandardMaterial3D
         {
             AlbedoTexture = _atlas?.AtlasTexture,
@@ -97,16 +108,12 @@ public partial class World : Node3D
             AlphaScissorThreshold = 0.5f,
             CullMode = BaseMaterial3D.CullModeEnum.Back,
             DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Always,
-            // 禁用环境光反射以避免灰蒙蒙的效果
             AlbedoColor = new Color(1.0f, 1.0f, 1.0f, 1.0f),
             ShadingMode = BaseMaterial3D.ShadingModeEnum.PerVertex,
-            // 增强纹理过滤
             TextureFilter = BaseMaterial3D.TextureFilterEnum.NearestWithMipmaps,
-            // 禁用环境光以获得更清晰的色彩
             DisableAmbientLight = true
         };
 
-        // 透明方块材质 - 对树叶等半透明使用 AlphaScissor，保持深度写入避免“远近树叶叠在一起”
         _transparentMaterial = new StandardMaterial3D
         {
             AlbedoTexture = _atlas?.AtlasTexture,
@@ -114,12 +121,9 @@ public partial class World : Node3D
             AlphaScissorThreshold = 0.25f,
             CullMode = BaseMaterial3D.CullModeEnum.Back,
             DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Always,
-            // 禁用环境光反射以避免灰蒙蒙的效果
             AlbedoColor = new Color(1.0f, 1.0f, 1.0f, 1.0f),
             ShadingMode = BaseMaterial3D.ShadingModeEnum.PerVertex,
-            // 增强纹理过滤
             TextureFilter = BaseMaterial3D.TextureFilterEnum.NearestWithMipmaps,
-            // 禁用环境光以获得更清晰的色彩
             DisableAmbientLight = true
         };
 
@@ -133,40 +137,112 @@ public partial class World : Node3D
             );
         }
 
-        // 以玩家出生 Chunk 为中心生成 ChunkGridSize * ChunkGridSize 的地形
-        GenerateChunksAroundSpawn();
-        RebuildAllChunkMeshes();
-
         if (_player != null)
         {
             PositionPlayerOnSurface();
         }
+
+        _cancellationSource = new CancellationTokenSource();
+        _generationThread = new Thread(() => GenerationLoop(_cancellationSource.Token))
+        {
+            Name = "ChunkGenerationThread",
+            IsBackground = true
+        };
+        _generationThread.Start();
     }
 
-    private void GenerateChunksAroundSpawn()
+    public override void _Process(double delta)
     {
-        int startX = SpawnChunkCoord.X - ChunkGridSize / 2;
-        int startZ = SpawnChunkCoord.Y - ChunkGridSize / 2;
+        UpdateMeshes();
+        if (_player == null) return;
 
-        for (int cx = 0; cx < ChunkGridSize; cx++)
+        Vector2I currentPlayerChunkPos = GetChunkPosFromPlayerPos();
+        if (currentPlayerChunkPos != _lastPlayerChunkPos)
         {
-            for (int cz = 0; cz < ChunkGridSize; cz++)
+            _lastPlayerChunkPos = currentPlayerChunkPos;
+            LoadChunksAroundPlayer();
+        }
+    }
+
+    public override void _ExitTree()
+    {
+        _cancellationSource?.Cancel();
+        _generationThread?.Join();
+        _cancellationSource?.Dispose();
+    }
+
+    private void GenerationLoop(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            if (_chunksToLoad.TryDequeue(out var coordToLoad))
             {
-                for (int cy = 0; cy < VerticalChunkCount; cy++)
-                {
-                    var coord = new Vector3I(startX + cx, cy, startZ + cz);
-                    LoadChunk(coord);
-                }
+                if (_chunks.ContainsKey(coordToLoad)) continue;
+                var chunk = new Chunk(coordToLoad);
+                GenerateChunkTerrain(chunk);
+                _chunks[coordToLoad] = chunk;
+                _chunksToMesh.Enqueue(coordToLoad);
+            }
+            else if (_chunksToMesh.TryDequeue(out var coordToMesh))
+            {
+                if (!_chunks.TryGetValue(coordToMesh, out var chunk)) continue;
+                Mesh mesh = ChunkMesher.BuildMesh(chunk, coordToMesh, _atlas, _opaqueMaterial, _transparentMaterial);
+                _meshesToBuild.Enqueue((coordToMesh, mesh));
+            }
+            else
+            {
+                Thread.Sleep(10);
             }
         }
     }
 
-    public void LoadChunk(Vector3I coord)
+    private void UpdateMeshes()
     {
-        if (_chunks.ContainsKey(coord)) return;
-        var chunk = new Chunk(coord);
-        _chunks[coord] = chunk;
-        GenerateChunkTerrain(chunk);
+        while (_meshesToBuild.TryDequeue(out var result))
+        {
+            var (coord, mesh) = result;
+            RebuildChunkMeshInternal(coord, mesh);
+            lock (_loadingOrMeshing)
+            {
+                _loadingOrMeshing.Remove(coord);
+            }
+        }
+    }
+
+    private Vector2I GetChunkPosFromPlayerPos()
+    {
+        if (_player == null) return Vector2I.Zero;
+        return new Vector2I(
+            Mathf.FloorToInt(_player.GlobalPosition.X / (Chunk.SizeX * BlockMetrics.StandardBlockSize)),
+            Mathf.FloorToInt(_player.GlobalPosition.Z / (Chunk.SizeZ * BlockMetrics.StandardBlockSize))
+        );
+    }
+
+    private void LoadChunksAroundPlayer()
+    {
+        int startX = _lastPlayerChunkPos.X - ViewDistance;
+        int endX = _lastPlayerChunkPos.X + ViewDistance;
+        int startZ = _lastPlayerChunkPos.Y - ViewDistance;
+        int endZ = _lastPlayerChunkPos.Y + ViewDistance;
+
+        for (int cx = startX; cx <= endX; cx++)
+        {
+            for (int cz = startZ; cz <= endZ; cz++)
+            {
+                for (int cy = 0; cy < VerticalChunkCount; cy++)
+                {
+                    var coord = new Vector3I(cx, cy, cz);
+                    lock (_loadingOrMeshing)
+                    {
+                        if (!_chunks.ContainsKey(coord) && !_loadingOrMeshing.Contains(coord))
+                        {
+                            _chunksToLoad.Enqueue(coord);
+                            _loadingOrMeshing.Add(coord);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void GenerateChunkTerrain(Chunk chunk)
@@ -274,7 +350,7 @@ public partial class World : Node3D
         surfaceBlocks = Mathf.Clamp(surfaceBlocks, seaBlocks, MaxSurfaceBlocks);
 
         float rockSample = _stoneNoise.GetNoise2D(worldMetersX * 0.5f, worldMetersZ * 0.5f);
-    BlockType surfaceType = BlockType.GrassFull;
+        BlockType surfaceType = BlockType.GrassFull;
         if (rockSample > 0.55f)
             surfaceType = BlockType.Stone;
         if (rockSample > 0.7f)
@@ -366,12 +442,11 @@ public partial class World : Node3D
                 body.QueueFree();
             }
         }
-
         _chunkBodies.Clear();
 
         foreach (var kv in _chunks)
         {
-            RebuildChunkMeshInternal(kv.Key, kv.Value);
+            _chunksToMesh.Enqueue(kv.Key);
         }
     }
 
@@ -410,23 +485,17 @@ public partial class World : Node3D
         return true;
     }
 
-    private void RebuildChunkMesh(Vector3I chunkCoord)
-    {
-        if (!_chunks.TryGetValue(chunkCoord, out var chunk))
-            return;
-
-        RebuildChunkMeshInternal(chunkCoord, chunk);
-    }
-
-    private void RebuildChunkMeshInternal(Vector3I chunkCoord, Chunk chunk)
+    private void RebuildChunkMeshInternal(Vector3I chunkCoord, Mesh mesh)
     {
         if (_chunkBodies.TryGetValue(chunkCoord, out var existing) && GodotObject.IsInstanceValid(existing))
         {
             existing.QueueFree();
-            _chunkBodies.Remove(chunkCoord);
+            _chunkBodies.TryRemove(chunkCoord, out _);
         }
 
-        var chunkBody = CreateChunkBody(chunkCoord, chunk);
+        if (mesh == null) return;
+
+        var chunkBody = CreateChunkBody(chunkCoord, mesh);
         if (chunkBody == null)
             return;
 
@@ -434,10 +503,9 @@ public partial class World : Node3D
         _chunkBodies[chunkCoord] = chunkBody;
     }
 
-    private StaticBody3D CreateChunkBody(Vector3I chunkCoord, Chunk chunk)
+    private StaticBody3D CreateChunkBody(Vector3I chunkCoord, Mesh mesh)
     {
-    Mesh mesh = ChunkMesher.BuildMesh(chunk, chunkCoord, _atlas, _opaqueMaterial, _transparentMaterial);
-        if (mesh == null || mesh.GetSurfaceCount() == 0)
+        if (mesh.GetSurfaceCount() == 0)
             return null;
 
         var staticBody = new StaticBody3D
@@ -455,8 +523,12 @@ public partial class World : Node3D
         staticBody.AddChild(meshInstance);
 
         var collisionShape = new CollisionShape3D { Name = "ChunkCollision" };
-        collisionShape.Shape = mesh.CreateTrimeshShape();
-        staticBody.AddChild(collisionShape);
+        var trimeshShape = mesh.CreateTrimeshShape();
+        if (trimeshShape != null)
+        {
+            collisionShape.Shape = trimeshShape;
+            staticBody.AddChild(collisionShape);
+        }
 
         return staticBody;
     }
@@ -507,7 +579,16 @@ public partial class World : Node3D
             return false;
         bool changed = chunk.Set(local.X, local.Y, local.Z, blockType);
         if (changed)
+        {
             touchedChunks.Add(chunkCoord);
+            // Also mark neighbors for remeshing if the block is on a chunk border
+            if (local.X == 0) touchedChunks.Add(chunkCoord + Vector3I.Left);
+            if (local.X == Chunk.SizeX - 1) touchedChunks.Add(chunkCoord + Vector3I.Right);
+            if (local.Y == 0) touchedChunks.Add(chunkCoord + Vector3I.Down);
+            if (local.Y == Chunk.SizeY - 1) touchedChunks.Add(chunkCoord + Vector3I.Up);
+            if (local.Z == 0) touchedChunks.Add(chunkCoord + Vector3I.Back);
+            if (local.Z == Chunk.SizeZ - 1) touchedChunks.Add(chunkCoord + Vector3I.Forward);
+        }
         return changed;
     }
 
@@ -515,7 +596,10 @@ public partial class World : Node3D
     {
         foreach (var coord in chunkCoords)
         {
-            RebuildChunkMesh(coord);
+            if (_chunks.ContainsKey(coord))
+            {
+                _chunksToMesh.Enqueue(coord);
+            }
         }
     }
 

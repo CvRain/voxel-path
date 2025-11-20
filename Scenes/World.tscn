@@ -1,6 +1,6 @@
 [gd_scene load_steps=8 format=3 uid="uid://jf6dn7tgufk5"]
 
-[ext_resource type="PackedScene" uid="uid://de62g6mi0ip7e" path="res://Scenes/Player/player.tscn" id="1_nnsk1"]
+[ext_resource type="PackedScene" uid="uid://bs72ogkvdd7d6" path="res://Scenes/PlayerController/Player.tscn" id="1_5cjrv"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_tujww"]
 sky_top_color = Color(0, 0.5385054, 0.8437968, 1)
@@ -44,5 +44,6 @@ physics_material_override = SubResource("PhysicsMaterial_tujww")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="MeshInstance3D/StaticBody3D"]
 shape = SubResource("WorldBoundaryShape3D_tujww")
 
-[node name="Player" parent="." instance=ExtResource("1_nnsk1")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+[node name="ProtoController" parent="." instance=ExtResource("1_5cjrv")]
+can_sprint = true
+can_freefly = true

@@ -1,1 +1,0 @@
-// Legacy macro block container removed – placeholder kept to avoid compile errors if referenced.

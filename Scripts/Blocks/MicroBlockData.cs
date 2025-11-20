@@ -1,1 +1,0 @@
-// Legacy micro block helper removed – world now stores micro blocks directly inside Chunk.

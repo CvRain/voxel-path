@@ -1,0 +1,10 @@
+{
+  "category": "machines",
+  "display_name": "Machines",
+  "priority": 10,
+  "description": "Blocks that function as machines or devices.",
+  "version": "1.0",
+  
+  "blocks": [
+  ]
+}

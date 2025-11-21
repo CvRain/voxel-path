@@ -8,6 +8,7 @@ extends Resource
 @export var category: String = "unknown"
 @export var description: String = ""
 
+@export var texture_paths: Dictionary = {}
 @export var textures: Dictionary = {}
 @export var is_transparent: bool = false
 @export var blend_mode: String = "opaque"
@@ -41,7 +42,8 @@ func get_variant(variant_name: String) -> BlockData:
 func validate() -> bool:
 	if id <= 0 or name.is_empty():
 		return false
-	if textures.is_empty():
+	# textures will be empty initially, check texture_paths instead
+	if texture_paths.is_empty() and textures.is_empty():
 		return false
 	return true
 

@@ -6,14 +6,7 @@
   "description": "A common stone block found in mountains and underground",
 
   "textures": {
-    "diffuse": {
-      "atlas": "blocks_core_diffuse",
-      "tile": "stone"
-    },
-    "normal": {
-      "atlas": "blocks_core_normal",
-      "tile": "stone"
-    }
+    "all": "res://Assets/Textures/stone.png"
   },
 
   "properties": {

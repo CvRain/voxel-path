@@ -37,10 +37,15 @@ enum MoveState {GROUND, FLYING}
 @export var input_sprint: String = "sprint"
 @export var input_fly_down: String = "sprint" # In fly mode, sprint key becomes fly_down
 
+@export_group("Debug")
+@export var debug_enabled: bool = false
+@export var debug_interval: float = 0.5
+
 # --- Private Variables ---
 var _mouse_captured: bool = false
 var _look_rotation: Vector2
 var _gravity: float
+var _debug_timer: float = 0.0
 
 var _current_state: MoveState = MoveState.GROUND
 var _last_jump_press: float = 1.0
@@ -73,6 +78,12 @@ func _input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	_last_jump_press += delta
 	
+	if debug_enabled:
+		_debug_timer += delta
+		if _debug_timer >= debug_interval:
+			_debug_timer = 0.0
+			print("Player Pos: %s | Rot: %s" % [global_position, rotation_degrees])
+
 	# --- State Transitions ---
 	if can_fly and Input.is_action_just_pressed(input_jump):
 		if _last_jump_press < _DOUBLE_JUMP_TIME:

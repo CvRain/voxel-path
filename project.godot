@@ -15,9 +15,17 @@ run/main_scene="uid://jf6dn7tgufk5"
 config/features=PackedStringArray("4.5", "Forward Plus")
 config/icon="uid://271lp7bh2he2"
 
+[autoload]
+
+GlobalLogger="*res://Scripts/Core/logger.gd"
+
 [dotnet]
 
 project/assembly_name="VoxelPath"
+
+[editor]
+
+version_control/autoload_on_startup=true
 
 [input]
 

@@ -6,22 +6,9 @@
   "description": "Dirt block covered with grass",
 
   "textures": {
-    "diffuse": {
-      "atlas": "blocks_core_diffuse",
-      "tile": "grass_top"
-    },
-    "side_diffuse": {
-      "atlas": "blocks_core_diffuse",
-      "tile": "grass_side"
-    },
-    "bottom_diffuse": {
-      "atlas": "blocks_core_diffuse",
-      "tile": "dirt"
-    },
-    "normal": {
-      "atlas": "blocks_core_normal",
-      "tile": "grass_top"
-    }
+    "top": "res://Assets/Textures/grass.png",
+    "side": "res://Assets/Textures/grass.png",
+    "bottom": "res://Assets/Textures/dirt.png"
   },
 
   "properties": {

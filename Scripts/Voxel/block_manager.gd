@@ -37,7 +37,7 @@ func _ready() -> void:
 		MyLogger.error("BlockRegistry not found")
 		return
 	
-	await load_all_blocks()
+	load_all_blocks()
 
 func load_all_blocks() -> void:
 	MyLogger.info("=== Starting Block Loading ===")
@@ -60,9 +60,12 @@ func load_all_blocks() -> void:
 			current += 1
 			continue
 		
-		await load_category(category_info)
+		load_category(category_info)
 		current += 1
 		loading_progress.emit(current, total)
+	
+	_texture_manager.build_atlas()
+	_resolve_all_block_uvs()
 	
 	_loading_complete = true
 	MyLogger.success("Block loading complete. Total blocks: %d" % BlockRegistry.get_block_count())
@@ -82,22 +85,15 @@ func load_category(category_info: Dictionary) -> void:
 	
 	var category_name = category_config.get("category", "unknown")
 	
-	await _load_category_textures(category_config)
-	await _load_category_blocks(category_path, category_config)
+	# Textures are now loaded per-block
+	# await _load_category_textures(category_config)
+	_load_category_blocks(category_path, category_config)
 	
 	_loaded_categories[category_name] = category_config
 	MyLogger.debug("Category loaded: %s" % category_name)
 
 func _load_category_textures(category_config: Dictionary) -> void:
-	var atlases = category_config.get("texture_atlases", [])
-	
-	for atlas_config in atlases:
-		var atlas_name = atlas_config.get("name", "")
-		if atlas_name.is_empty():
-			continue
-		
-		MyLogger.debug("Loading texture atlas: %s" % atlas_name)
-		_texture_manager.register_atlas(atlas_name, atlas_config)
+	pass # Deprecated: Textures are loaded from block files directly
 
 func _load_category_blocks(category_path: String, category_config: Dictionary) -> void:
 	var block_files = category_config.get("blocks", [])
@@ -140,7 +136,7 @@ func _create_and_register_block(block_config: Dictionary) -> BlockData:
 	_load_block_textures(block, block_config)
 	
 	if block.validate():
-		_block_registry.register_block(block)
+		BlockRegistry.register_block(block)
 		if Constants.DEBUG_BLOCK_LOADING:
 			MyLogger.debug("Registered block: %s (id: %d)" % [block.name, block.id])
 	else:
@@ -149,18 +145,46 @@ func _create_and_register_block(block_config: Dictionary) -> BlockData:
 	return block
 
 func _load_block_textures(block: BlockData, block_config: Dictionary) -> void:
-	var textures = block_config.get("textures", {})
+	var textures_config = block_config.get("textures", {})
 	
-	for texture_type in textures:
-		var texture_info = textures[texture_type]
-		var atlas_name = texture_info.get("atlas", "")
-		var tile_name = texture_info.get("tile", "")
+	# Handle "all" shortcut
+	if "all" in textures_config:
+		var path = textures_config["all"]
+		block.texture_paths["all"] = path
+		_texture_manager.register_texture(path)
 		
-		var texture_uv = TextureManager.get_texture_uv(atlas_name, tile_name)
-		if texture_uv != null:
-			block.textures[texture_type] = texture_uv
-			for face in ["top", "bottom", "front", "back", "left", "right"]:
-				block.textures["%s_%s" % [face, texture_type]] = texture_uv
+	# Handle specific faces
+	for face in ["top", "bottom", "left", "right", "front", "back", "side"]:
+		if face in textures_config:
+			var path = textures_config[face]
+			block.texture_paths[face] = path
+			_texture_manager.register_texture(path)
+
+func _resolve_all_block_uvs() -> void:
+	var block_ids = BlockRegistry.get_all_block_ids()
+	for id in block_ids:
+		var block = BlockRegistry.get_block(id)
+		if not block: continue
+		
+		# Handle "all"
+		if "all" in block.texture_paths:
+			var path = block.texture_paths["all"]
+			var uv = _texture_manager.get_texture_uv(path)
+			if uv:
+				block.textures["diffuse"] = uv
+		
+		# Handle specific faces
+		for face in ["top", "bottom", "left", "right", "front", "back"]:
+			var path = null
+			if face in block.texture_paths:
+				path = block.texture_paths[face]
+			elif "side" in block.texture_paths and face in ["left", "right", "front", "back"]:
+				path = block.texture_paths["side"]
+			
+			if path:
+				var uv = _texture_manager.get_texture_uv(path)
+				if uv:
+					block.textures["%s_diffuse" % face] = uv
 
 static func get_loaded_categories() -> Dictionary:
 	return _instance._loaded_categories.duplicate() if _instance else {}

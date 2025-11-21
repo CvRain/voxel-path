@@ -39,8 +39,8 @@ static func allocate_mod_block_id() -> int:
 static func get_block(block_id: int) -> BlockData:
 	return _blocks.get(block_id)
 
-static func get_block_by_name(name: String) -> BlockData:
-	var id = _block_names.get(name, -1)
+static func get_block_by_name(block_name: String) -> BlockData:
+	var id = _block_names.get(block_name, -1)
 	return _blocks.get(id) if id >= 0 else null
 
 static func get_all_block_ids() -> Array:

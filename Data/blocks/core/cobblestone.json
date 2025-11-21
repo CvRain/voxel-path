@@ -6,14 +6,7 @@
   "description": "A decorative stone block with a rough texture",
 
   "textures": {
-    "diffuse": {
-      "atlas": "blocks_core_diffuse",
-      "tile": "cobblestone"
-    },
-    "normal": {
-      "atlas": "blocks_core_normal",
-      "tile": "cobblestone"
-    }
+    "all": "res://Assets/Textures/cobblestone.png"
   },
 
   "properties": {

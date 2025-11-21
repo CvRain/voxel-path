@@ -6,14 +6,7 @@
   "description": "The deepest layer of the world. Unbreakable in survival mode.",
 
   "textures": {
-    "diffuse": {
-      "atlas": "blocks_core_diffuse",
-      "tile": "bedrock"
-    },
-    "normal": {
-      "atlas": "blocks_core_normal",
-      "tile": "bedrock"
-    }
+    "all": "res://Assets/Textures/bedrock.png"
   },
 
   "properties": {

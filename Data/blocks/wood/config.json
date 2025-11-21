@@ -1,0 +1,10 @@
+{
+  "category": "wood",
+  "display_name": "Wood Blocks",
+  "priority": 10,
+  "description": "Wood and wooden blocks: oak, birch, spruce, etc.",
+  "version": "1.0",
+  
+  "blocks": [
+  ]
+}

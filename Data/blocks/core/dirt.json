@@ -6,14 +6,7 @@
   "description": "Soft soil block, easy to mine",
 
   "textures": {
-    "diffuse": {
-      "atlas": "blocks_core_diffuse",
-      "tile": "dirt"
-    },
-    "normal": {
-      "atlas": "blocks_core_normal",
-      "tile": "dirt"
-    }
+    "all": "res://Assets/Textures/dirt.png"
   },
 
   "properties": {

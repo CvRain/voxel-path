@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://583ktfa4a5ss"
-path="res://.godot/imported/grass_block_snow.png-f539aa46179e919157694cf3a4db9755.ctex"
+uid="uid://rhg8oa2y4t7e"
+path="res://.godot/imported/bedrock.png-7bd9c2e23ed8ccc279c15ad396ab0a8d.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://Assets/Blocks/grass_block_snow.png"
-dest_files=["res://.godot/imported/grass_block_snow.png-f539aa46179e919157694cf3a4db9755.ctex"]
+source_file="res://Assets/Textures/bedrock.png"
+dest_files=["res://.godot/imported/bedrock.png-7bd9c2e23ed8ccc279c15ad396ab0a8d.ctex"]
 
 [params]
 

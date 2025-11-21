@@ -3,9 +3,9 @@ class_name TextureManager
 extends Node
 
 static var _instance: TextureManager
-var _atlases: Dictionary = {}
-var _tile_cache: Dictionary = {}
-var _atlas_configs: Dictionary = {}
+var _atlas_texture: ImageTexture
+var _uv_cache: Dictionary = {} # path -> TextureUV
+var _pending_textures: Dictionary = {} # path -> Image
 
 func _enter_tree() -> void:
 	if _instance != null:
@@ -14,75 +14,88 @@ func _enter_tree() -> void:
 	_instance = self
 	set_process_mode(Node.PROCESS_MODE_ALWAYS)
 
-func register_atlas(atlas_name: String, atlas_config: Dictionary) -> void:
-	var texture_path = atlas_config.get("path", "")
-	
-	if not ResourceLoader.exists(texture_path):
-		MyLogger.error("Texture not found: %s" % texture_path)
+func register_texture(path: String) -> void:
+	if path in _pending_textures:
 		return
-	
-	if atlas_name in _atlases:
-		MyLogger.warn("Overwriting existing atlas: %s" % atlas_name)
-	
-	var texture = load(texture_path) as Texture2D
-	if texture == null:
-		MyLogger.error("Failed to load texture: %s" % texture_path)
+		
+	if not FileAccess.file_exists(path):
+		MyLogger.error("Texture file not found: %s" % path)
 		return
-	
-	_atlases[atlas_name] = texture
-	_atlas_configs[atlas_name] = atlas_config
-	
-	_compute_tile_uvs(atlas_name, atlas_config)
-	
-	MyLogger.debug("Registered texture atlas: %s" % atlas_name)
-
-func _compute_tile_uvs(atlas_name: String, atlas_config: Dictionary) -> void:
-	var tile_size = atlas_config.get("tile_size", 16)
-	var padding = atlas_config.get("padding", 0)
-	var tiles_config = atlas_config.get("tiles", {})
-	var texture = _atlases[atlas_name]
-	
-	var atlas_width = float(texture.get_width())
-	var atlas_height = float(texture.get_height())
-	var tiles_per_row = int(atlas_width / (tile_size + padding))
-	
-	for tile_name in tiles_config:
-		var tile_index = tiles_config[tile_name]
-		var row = tile_index / tiles_per_row
-		var col = tile_index % tiles_per_row
 		
-		var pixel_x = col * (tile_size + padding) + padding
-		var pixel_y = row * (tile_size + padding) + padding
-		
-		var uv_x = float(pixel_x) / atlas_width
-		var uv_y = float(pixel_y) / atlas_height
-		var uv_size_x = float(tile_size) / atlas_width
-		var uv_size_y = float(tile_size) / atlas_height
-		
-		var uv_rect = Rect2(uv_x, uv_y, uv_size_x, uv_size_y)
-		var cache_key = "%s:%s" % [atlas_name, tile_name]
-		
-		_tile_cache[cache_key] = TextureUV.new(atlas_name, tile_index, uv_rect)
+	var image = Image.load_from_file(path)
+	if image:
+		_pending_textures[path] = image
+	else:
+		MyLogger.error("Failed to load image: %s" % path)
 
-static func get_texture_uv(atlas_name: String, tile_name: String) -> TextureUV:
-	if _instance == null:
-		return null
+func build_atlas() -> void:
+	if _pending_textures.is_empty():
+		return
+		
+	MyLogger.info("Building atlas from %d textures..." % _pending_textures.size())
 	
-	var cache_key = "%s:%s" % [atlas_name, tile_name]
-	var uv = _instance._tile_cache.get(cache_key)
+	# Determine tile size (assume first image size)
+	var first_img = _pending_textures.values()[0]
+	var tile_size = first_img.get_width()
 	
-	if uv == null:
-		MyLogger.warn("Texture UV not found: %s:%s" % [atlas_name, tile_name])
+	# Calculate atlas size
+	var count = _pending_textures.size()
+	var atlas_width = int(ceil(sqrt(count))) * tile_size
+	var atlas_height = int(ceil(float(count * tile_size) / atlas_width)) * tile_size
 	
-	return uv
+	# Power of 2
+	atlas_width = _next_power_of_2(atlas_width)
+	atlas_height = _next_power_of_2(atlas_height)
+	
+	var atlas_image = Image.create(atlas_width, atlas_height, false, Image.FORMAT_RGBA8)
+	
+	var x = 0
+	var y = 0
+	
+	for path in _pending_textures:
+		var img = _pending_textures[path]
+		if img.get_width() != tile_size or img.get_height() != tile_size:
+			img.resize(tile_size, tile_size)
+			
+		if x + tile_size > atlas_width:
+			x = 0
+			y += tile_size
+			
+		atlas_image.blit_rect(img, Rect2i(0, 0, tile_size, tile_size), Vector2i(x, y))
+		
+		var uv_rect = Rect2(
+			float(x) / atlas_width,
+			float(y) / atlas_height,
+			float(tile_size) / atlas_width,
+			float(tile_size) / atlas_height
+		)
+		
+		# We use path as the key for retrieval
+		_uv_cache[path] = TextureUV.new("main", 0, uv_rect)
+		
+		x += tile_size
+		
+	_atlas_texture = ImageTexture.create_from_image(atlas_image)
+	MyLogger.success("Atlas generated: %dx%d" % [atlas_width, atlas_height])
 
-static func get_atlas_texture(atlas_name: String) -> Texture2D:
-	if _instance == null:
-		return null
-	return _instance._atlases.get(atlas_name)
-
-static func has_atlas(atlas_name: String) -> bool:
-	return _instance != null and atlas_name in _instance._atlases
+func get_texture_uv(path: String) -> TextureUV:
+	return _uv_cache.get(path)
 
 static func get_instance() -> TextureManager:
 	return _instance
+
+static func get_main_atlas() -> Texture2D:
+	if _instance:
+		return _instance._atlas_texture
+	return null
+
+func _next_power_of_2(v: int) -> int:
+	if v == 0: return 1
+	v -= 1
+	v |= v >> 1
+	v |= v >> 2
+	v |= v >> 4
+	v |= v >> 8
+	v |= v >> 16
+	v += 1
+	return v

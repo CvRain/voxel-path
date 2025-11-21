@@ -1,0 +1,50 @@
+[gd_scene load_steps=9 format=3 uid="uid://cqnicpmxtklbi"]
+
+[ext_resource type="PackedScene" uid="uid://bs72ogkvdd7d6" path="res://Scenes/PlayerController/Player.tscn" id="1_sg45x"]
+[ext_resource type="Script" uid="uid://cmggn5y7lqrse" path="res://Scenes/TestWorld/TestWorld.gd" id="2_test_world"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_x0uea"]
+sky_top_color = Color(0, 0.5385054, 0.8437968, 1)
+sky_horizon_color = Color(0.5658256, 0.69270194, 0.7600248, 1)
+ground_horizon_color = Color(0.5658256, 0.69270194, 0.7600248, 1)
+
+[sub_resource type="Sky" id="Sky_qsgc4"]
+sky_material = SubResource("ProceduralSkyMaterial_x0uea")
+
+[sub_resource type="Environment" id="Environment_yj8ql"]
+background_mode = 2
+sky = SubResource("Sky_qsgc4")
+tonemap_mode = 2
+ssao_enabled = true
+sdfgi_enabled = true
+glow_enabled = true
+
+[sub_resource type="PlaneMesh" id="PlaneMesh_18g6m"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_gxokt"]
+
+[sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_n2tg6"]
+
+[node name="TryWorld" type="Node3D"]
+script = ExtResource("2_test_world")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.7132504, -0.53614056, 0.45147228, 0, 0.6441237, 0.76492137, -0.7009093, 0.5455805, -0.45942146, 0, 100, 0)
+light_color = Color(1.2485627, 0.8821361, 0.5000055, 1)
+shadow_enabled = true
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_yj8ql")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="."]
+transform = Transform3D(10, 0, 0, 0, 1, 0, 0, 0, 10, 0, 0, 0)
+mesh = SubResource("PlaneMesh_18g6m")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="MeshInstance3D"]
+physics_material_override = SubResource("PhysicsMaterial_gxokt")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="MeshInstance3D/StaticBody3D"]
+shape = SubResource("WorldBoundaryShape3D_n2tg6")
+
+[node name="ProtoController" parent="." instance=ExtResource("1_sg45x")]
+debug_enabled = true

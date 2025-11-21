@@ -6,7 +6,7 @@
 extends CharacterBody3D
 
 # --- Enums ---
-enum MoveState {GROUND, FLYING}
+enum MoveState {GROUND, FLYING, NOCLIP}
 
 # --- Exports ---
 @export_group("Movement")
@@ -15,6 +15,7 @@ enum MoveState {GROUND, FLYING}
 @export var can_jump: bool = true
 @export var can_sprint: bool = true
 @export var can_fly: bool = true
+@export var can_noclip: bool = true
 
 @export_group("Speeds")
 @export var look_speed: float = 0.0035
@@ -36,6 +37,7 @@ enum MoveState {GROUND, FLYING}
 @export var input_jump: String = "jump"
 @export var input_sprint: String = "sprint"
 @export var input_fly_down: String = "sprint" # In fly mode, sprint key becomes fly_down
+@export var input_noclip_toggle: String = "noclip_toggle"
 
 @export_group("Debug")
 @export var debug_enabled: bool = false
@@ -87,8 +89,17 @@ func _physics_process(delta: float) -> void:
 	# --- State Transitions ---
 	if can_fly and Input.is_action_just_pressed(input_jump):
 		if _last_jump_press < _DOUBLE_JUMP_TIME:
-			_set_state(MoveState.FLYING if _current_state == MoveState.GROUND else MoveState.GROUND)
+			if _current_state == MoveState.GROUND:
+				_set_state(MoveState.FLYING)
+			else:
+				_set_state(MoveState.GROUND)
 		_last_jump_press = 0.0
+		
+	if can_noclip and Input.is_action_just_pressed(input_noclip_toggle):
+		if _current_state == MoveState.NOCLIP:
+			_set_state(MoveState.FLYING) # Toggle back to flying
+		else:
+			_set_state(MoveState.NOCLIP)
 
 	# --- State Logic ---
 	match _current_state:
@@ -96,6 +107,8 @@ func _physics_process(delta: float) -> void:
 			_ground_physics(delta)
 		MoveState.FLYING:
 			_flying_physics(delta)
+		MoveState.NOCLIP:
+			_flying_physics(delta) # Reuse flying physics for noclip
 
 # --- State Implementations ---
 func _ground_physics(delta: float):
@@ -165,7 +178,10 @@ func _set_state(new_state: MoveState):
 			collider.disabled = false
 			has_gravity = true
 		MoveState.FLYING:
-			collider.disabled = true
+			collider.disabled = false # Enable collision for normal flying
+			has_gravity = false
+		MoveState.NOCLIP:
+			collider.disabled = true # Disable collision for noclip
 			has_gravity = false
 
 func _handle_mouse_look(relative_motion: Vector2):
@@ -190,7 +206,8 @@ func check_input_mappings():
 		"Movement": [can_move, [input_left, input_right, input_forward, input_back]],
 		"Jumping": [can_jump, [input_jump]],
 		"Sprinting": [can_sprint, [input_sprint]],
-		"Flying": [can_fly, [input_fly_down]]
+		"Flying": [can_fly, [input_fly_down]],
+		"Noclip": [can_noclip, [input_noclip_toggle]]
 	}
 	
 	for feature in actions:

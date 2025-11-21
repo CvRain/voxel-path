@@ -64,29 +64,42 @@ func _create_block_mesh(block: BlockData, pos: Vector3) -> void:
 	# -Z is Forward (Front), +Z is Backward (Back)
 	# +X is Right, -X is Left
 	# +Y is Up, -Y is Down
+	
+	# We define indices to match the UV mapping order:
+	# Triangle 1: Bottom-Left, Top-Right, Bottom-Right (CW)
+	# Triangle 2: Bottom-Left, Top-Left, Top-Right (CW)
+	# We are flipping to CW because the previous CCW appeared inverted/culled.
+	
 	var faces = [
 		# Front Face (+Z direction)
-		# Vertices: 5, 4, 7, 6 (BR, BL, TL, TR)
-		{"name": "front", "indices": [5, 7, 4, 5, 6, 7], "normal": Vector3(0, 0, 1)},
+		# Normal (0,0,1). Looking from +Z towards -Z.
+		# BL: 4, BR: 5, TR: 6, TL: 7
+		{"name": "front", "indices": [4, 6, 5, 4, 7, 6], "normal": Vector3(0, 0, 1)},
 		
 		# Back Face (-Z direction)
-		# Vertices: 0, 1, 2, 3 (BL, BR, TR, TL)
-		{"name": "back", "indices": [0, 2, 1, 0, 3, 2], "normal": Vector3(0, 0, -1)},
+		# Normal (0,0,-1). Looking from -Z towards +Z.
+		# BL: 1 (size,0,0), BR: 0 (0,0,0), TR: 3 (0,size,0), TL: 2 (size,size,0)
+		{"name": "back", "indices": [1, 3, 0, 1, 2, 3], "normal": Vector3(0, 0, -1)},
 		
 		# Top Face (+Y direction)
-		# Vertices: 8, 9, 10, 11 (TL, TR, BR, BL)
-		{"name": "top", "indices": [8, 9, 10, 8, 10, 11], "normal": Vector3(0, 1, 0)},
+		# Normal (0,1,0). Looking from +Y down.
+		# BL: 7 (0,size,size), BR: 6 (size,size,size), TR: 2 (size,size,0), TL: 3 (0,size,0)
+		{"name": "top", "indices": [7, 2, 6, 7, 3, 2], "normal": Vector3(0, 1, 0)},
 		
 		# Bottom Face (-Y direction)
-		{"name": "bottom", "indices": [12, 14, 13, 12, 15, 14], "normal": Vector3(0, -1, 0)},
+		# Normal (0,-1,0). Looking from -Y up.
+		# BL: 0 (0,0,0), BR: 1 (size,0,0), TR: 5 (size,0,size), TL: 4 (0,0,size)
+		{"name": "bottom", "indices": [0, 5, 1, 0, 4, 5], "normal": Vector3(0, -1, 0)},
 		
 		# Left Face (-X direction)
-		# Vertices: 16, 18, 17, 16, 19, 18 (BL, TR, BR, BL, TL, TR)
-		{"name": "left", "indices": [16, 18, 17, 16, 19, 18], "normal": Vector3(-1, 0, 0)},
+		# Normal (-1,0,0). Looking from -X towards +X.
+		# BL: 0 (0,0,0), BR: 4 (0,0,size), TR: 7 (0,size,size), TL: 3 (0,size,0)
+		{"name": "left", "indices": [0, 7, 4, 0, 3, 7], "normal": Vector3(-1, 0, 0)},
 		
 		# Right Face (+X direction)
-		# Vertices: 20, 21, 22, 23 (BL, BR, TR, TL)
-		{"name": "right", "indices": [20, 21, 22, 20, 22, 23], "normal": Vector3(1, 0, 0)}
+		# Normal (1,0,0). Looking from +X towards -X.
+		# BL: 5 (size,0,size), BR: 1 (size,0,0), TR: 2 (size,size,0), TL: 6 (size,size,size)
+		{"name": "right", "indices": [5, 2, 1, 5, 6, 2], "normal": Vector3(1, 0, 0)}
 	]
 	
 	for face in faces:
@@ -112,30 +125,30 @@ func _create_block_mesh(block: BlockData, pos: Vector3) -> void:
 		var uv_tr = Vector2(uv_rect.position.x + uv_rect.size.x, uv_rect.position.y)
 		var uv_tl = Vector2(uv_rect.position.x, uv_rect.position.y)
 		
-		# Triangle 1: 0, 1, 2 (BL, BR, TR) - CCW
+		# Triangle 1: 0, 1, 2 (BL, TR, BR) - CW
 		st.set_normal(normal)
 		st.set_uv(uv_bl)
 		st.add_vertex(vertices[indices[0]])
 		
 		st.set_normal(normal)
-		st.set_uv(uv_br) # Was Top-Right in previous code, fixed to Bottom-Right
+		st.set_uv(uv_tr)
 		st.add_vertex(vertices[indices[1]])
 		
 		st.set_normal(normal)
-		st.set_uv(uv_tr) # Was Bottom-Right in previous code, fixed to Top-Right
+		st.set_uv(uv_br)
 		st.add_vertex(vertices[indices[2]])
 		
-		# Triangle 2: 0, 2, 3 (BL, TR, TL) - CCW
+		# Triangle 2: 0, 2, 3 (BL, TL, TR) - CW
 		st.set_normal(normal)
 		st.set_uv(uv_bl)
 		st.add_vertex(vertices[indices[3]])
 		
 		st.set_normal(normal)
-		st.set_uv(uv_tr) # Was Top-Left in previous code, fixed to Top-Right
+		st.set_uv(uv_tl)
 		st.add_vertex(vertices[indices[4]])
 		
 		st.set_normal(normal)
-		st.set_uv(uv_tl) # Was Top-Right in previous code, fixed to Top-Left
+		st.set_uv(uv_tr)
 		st.add_vertex(vertices[indices[5]])
 
 	st.generate_normals()
@@ -152,6 +165,10 @@ func _create_block_mesh(block: BlockData, pos: Vector3) -> void:
 	mesh_instance.material_override = material
 	
 	add_child(mesh_instance)
+	
+	# Add collision if block has collision
+	if block.has_collision:
+		mesh_instance.create_trimesh_collision()
 	
 	# Add label
 	var label = Label3D.new()

@@ -1,0 +1,48 @@
+{
+  "category": "core",
+  "display_name": "Core Blocks",
+  "priority": 10,
+  "description": "Basic building blocks like stone, dirt, and grass. Foundation of the game world.",
+  "version": "1.0",
+  
+  "texture_atlases": [
+    {
+      "name": "blocks_core_diffuse",
+      "path": "res://Assets/Textures/blocks_core_diffuse.png",
+      "tile_size": 16,
+      "padding": 1,
+      "tiles": {
+        "stone": 0,
+        "stone_smooth": 1,
+        "dirt": 2,
+        "grass_top": 3,
+        "grass_side": 4,
+        "cobblestone": 5,
+        "bedrock": 6
+      }
+    },
+    {
+      "name": "blocks_core_normal",
+      "path": "res://Assets/Textures/blocks_core_normal.png",
+      "tile_size": 16,
+      "padding": 1,
+      "tiles": {
+        "stone": 0,
+        "stone_smooth": 1,
+        "dirt": 2,
+        "grass_top": 3,
+        "grass_side": 4,
+        "cobblestone": 5,
+        "bedrock": 6
+      }
+    }
+  ],
+  
+  "blocks": [
+    "stone.json",
+    "dirt.json",
+    "grass.json",
+    "cobblestone.json",
+    "bedrock.json"
+  ]
+}

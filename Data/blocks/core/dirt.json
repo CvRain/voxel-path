@@ -1,0 +1,45 @@
+{
+  "id": 2,
+  "name": "dirt",
+  "display_name": "Dirt",
+  "category": "core",
+  "description": "Soft soil block, easy to mine",
+
+  "textures": {
+    "diffuse": {
+      "atlas": "blocks_core_diffuse",
+      "tile": "dirt"
+    },
+    "normal": {
+      "atlas": "blocks_core_normal",
+      "tile": "dirt"
+    }
+  },
+
+  "properties": {
+    "hardness": 0.5,
+    "resistance": 0.8,
+    "is_solid": true,
+    "is_transparent": false
+  },
+
+  "physics": {
+    "has_collision": true,
+    "friction": 0.9,
+    "bounce": 0.0
+  },
+
+  "interactions": {
+    "can_place": true,
+    "can_break": true,
+    "tool_required": "none",
+    "mine_level": 0,
+    "mine_time": 0.5
+  },
+
+  "rendering": {
+    "blend_mode": "opaque",
+    "cull_mode": "back",
+    "cast_shadow": true
+  }
+}

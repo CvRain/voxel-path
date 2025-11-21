@@ -1,0 +1,54 @@
+{
+  "id": 3,
+  "name": "grass",
+  "display_name": "Grass Block",
+  "category": "core",
+  "description": "Dirt block covered with grass",
+
+  "textures": {
+    "diffuse": {
+      "atlas": "blocks_core_diffuse",
+      "tile": "grass_top"
+    },
+    "side_diffuse": {
+      "atlas": "blocks_core_diffuse",
+      "tile": "grass_side"
+    },
+    "bottom_diffuse": {
+      "atlas": "blocks_core_diffuse",
+      "tile": "dirt"
+    },
+    "normal": {
+      "atlas": "blocks_core_normal",
+      "tile": "grass_top"
+    }
+  },
+
+  "properties": {
+    "hardness": 0.6,
+    "resistance": 0.8,
+    "is_solid": true,
+    "is_transparent": false
+  },
+
+  "physics": {
+    "has_collision": true,
+    "friction": 0.95,
+    "bounce": 0.0
+  },
+
+  "interactions": {
+    "can_place": true,
+    "can_break": true,
+    "tool_required": "none",
+    "mine_level": 0,
+    "mine_time": 0.6
+  },
+
+  "rendering": {
+    "blend_mode": "opaque",
+    "cull_mode": "back",
+    "cast_shadow": true,
+    "per_face_texture": true
+  }
+}

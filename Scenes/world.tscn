@@ -1,6 +1,7 @@
-[gd_scene load_steps=8 format=3 uid="uid://jf6dn7tgufk5"]
+[gd_scene load_steps=9 format=3 uid="uid://jf6dn7tgufk5"]
 
-[ext_resource type="PackedScene" uid="uid://bs72ogkvdd7d6" path="res://Scenes/PlayerController/Player.tscn" id="1_5cjrv"]
+[ext_resource type="Script" uid="uid://crrkx6dwt5sju" path="res://Scenes/world.gd" id="1_go701"]
+[ext_resource type="PackedScene" uid="uid://bs72ogkvdd7d6" path="res://Scenes/PlayerController/Player.tscn" id="2_5a7ea"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_tujww"]
 sky_top_color = Color(0, 0.5385054, 0.8437968, 1)
@@ -25,6 +26,7 @@ glow_enabled = true
 [sub_resource type="WorldBoundaryShape3D" id="WorldBoundaryShape3D_tujww"]
 
 [node name="World" type="Node3D"]
+script = ExtResource("1_go701")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(-0.7132504, -0.53614056, 0.45147228, 0, 0.6441237, 0.76492137, -0.7009093, 0.5455805, -0.45942146, 0, 100, 0)
@@ -44,6 +46,4 @@ physics_material_override = SubResource("PhysicsMaterial_tujww")
 [node name="CollisionShape3D" type="CollisionShape3D" parent="MeshInstance3D/StaticBody3D"]
 shape = SubResource("WorldBoundaryShape3D_tujww")
 
-[node name="ProtoController" parent="." instance=ExtResource("1_5cjrv")]
-can_sprint = true
-can_freefly = true
+[node name="ProtoController" parent="." instance=ExtResource("2_5a7ea")]

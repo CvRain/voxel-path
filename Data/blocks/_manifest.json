@@ -1,1 +1,52 @@
-{"version": "1.0","blocks": {}}
+{
+  "format_version": "1.0",
+  "description": "Block registry manifest - Central configuration for all block categories",
+  "last_updated": "2025-11-21",
+  
+  "categories": [
+	{
+	  "path": "res://Data/blocks/core",
+	  "config": "config.json",
+	  "enabled": true,
+	  "priority": 10,
+	  "description": "Core building blocks: stone, dirt, grass, etc."
+	},
+	{
+	  "path": "res://Data/blocks/wood",
+	  "config": "config.json",
+	  "enabled": true,
+	  "priority": 20,
+	  "description": "Wood and wooden blocks: oak, birch, spruce, etc."
+	},
+	{
+	  "path": "res://Data/blocks/decorative",
+	  "config": "config.json",
+	  "enabled": true,
+	  "priority": 30,
+	  "description": "Decorative blocks: glass, sand, gravel, etc."
+	},
+	{
+	  "path": "res://Data/blocks/machines",
+	  "config": "config.json",
+	  "enabled": false,
+	  "priority": 40,
+	  "description": "Mechanical blocks - Future expansion"
+	}
+  ],
+  
+  "modded_categories": [
+	{
+	  "path": "user://mods",
+	  "config": "blocks/blocks.json",
+	  "enabled": true,
+	  "priority": 100,
+	  "description": "User-installed mods"
+	}
+  ],
+  
+  "settings": {
+	"auto_reload": false,
+	"validate_on_load": true,
+	"cache_enabled": true
+  }
+}

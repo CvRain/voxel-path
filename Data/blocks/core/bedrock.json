@@ -1,0 +1,38 @@
+{
+  "id": 5,
+  "name": "bedrock",
+  "display_name": "Bedrock",
+  "category": "core",
+  "description": "The deepest layer of the world. Unbreakable in survival mode.",
+
+  "textures": {
+    "diffuse": {
+      "atlas": "blocks_core_diffuse",
+      "tile": "bedrock"
+    },
+    "normal": {
+      "atlas": "blocks_core_normal",
+      "tile": "bedrock"
+    }
+  },
+
+  "properties": {
+    "hardness": 9999.0,
+    "resistance": 9999.0,
+    "is_solid": true,
+    "is_transparent": false
+  },
+
+  "physics": {
+    "has_collision": true,
+    "friction": 1.0,
+    "bounce": 0.0
+  },
+
+  "interactions": {
+    "can_place": false,
+    "can_break": false,
+    "tool_required": "none",
+    "mine_level": 99
+  }
+}

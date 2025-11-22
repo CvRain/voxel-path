@@ -1,4 +1,4 @@
-# ProtoController v2.0 by Brackeys & CvRain
+# ProtoController v2.1 by Brackeys & CvRain
 # CC0 License
 # Intended for rapid prototyping of first-person games.
 # Happy prototyping!
@@ -17,6 +17,7 @@ enum MoveState {GROUND, FLYING, NOCLIP}
 @export var can_fly: bool = true
 @export var can_noclip: bool = true
 @export var step_height: float = 1.1 # Max height to step up (0.25 is block size)
+@export var step_smooth_time: float = 0.15 # 阶梯上升的平滑时间
 
 @export_group("Speeds")
 @export var look_speed: float = 0.0035
@@ -37,7 +38,7 @@ enum MoveState {GROUND, FLYING, NOCLIP}
 @export var input_back: String = "move_back"
 @export var input_jump: String = "jump"
 @export var input_sprint: String = "sprint"
-@export var input_fly_down: String = "sprint" # In fly mode, sprint key becomes fly_down
+@export var input_fly_down: String = "sprint"
 @export var input_noclip_toggle: String = "noclip_toggle"
 
 @export_group("Debug")
@@ -53,6 +54,13 @@ var _debug_timer: float = 0.0
 var _current_state: MoveState = MoveState.GROUND
 var _last_jump_press: float = 1.0
 const _DOUBLE_JUMP_TIME: float = 0.3
+
+# ===== 阶梯平滑相关变量 =====
+var _stepping_up: bool = false
+var _step_start_pos: Vector3 = Vector3.ZERO
+var _step_target_pos: Vector3 = Vector3.ZERO
+var _step_elapsed_time: float = 0.0
+var _step_target_height: float = 0.0
 
 # --- Node References ---
 @onready var head: Node3D = $Head
@@ -85,7 +93,7 @@ func _physics_process(delta: float) -> void:
 		_debug_timer += delta
 		if _debug_timer >= debug_interval:
 			_debug_timer = 0.0
-			print("Player Pos: %s | Rot: %s" % [global_position, rotation_degrees])
+			print("Player Pos: %s | State: %s | Stepping: %s" % [global_position, _current_state, _stepping_up])
 
 	# --- State Transitions ---
 	if can_fly and Input.is_action_just_pressed(input_jump):
@@ -98,9 +106,14 @@ func _physics_process(delta: float) -> void:
 		
 	if can_noclip and Input.is_action_just_pressed(input_noclip_toggle):
 		if _current_state == MoveState.NOCLIP:
-			_set_state(MoveState.FLYING) # Toggle back to flying
+			_set_state(MoveState.FLYING)
 		else:
 			_set_state(MoveState.NOCLIP)
+
+	# --- 处理阶梯平滑上升 ---
+	if _stepping_up:
+		_update_step_smoothing(delta)
+		return # 在阶梯上升期间，跳过普通物理计算
 
 	# --- State Logic ---
 	match _current_state:
@@ -109,7 +122,7 @@ func _physics_process(delta: float) -> void:
 		MoveState.FLYING:
 			_flying_physics(delta)
 		MoveState.NOCLIP:
-			_flying_physics(delta) # Reuse flying physics for noclip
+			_flying_physics(delta)
 
 # --- State Implementations ---
 func _ground_physics(delta: float):
@@ -119,7 +132,7 @@ func _ground_physics(delta: float):
 	if has_gravity and not is_on_floor():
 		vel.y -= _gravity * delta
 
-	# Handle jumping - 连续跳跃逻辑
+	# Handle jumping
 	if can_jump and Input.is_action_pressed(input_jump) and is_on_floor():
 		vel.y = jump_velocity
 
@@ -142,16 +155,16 @@ func _ground_physics(delta: float):
 	velocity = vel
 	move_and_slide()
 	
-	if is_on_wall():
-		_handle_step_up()
-
+	# 检查并处理阶梯
+	if is_on_wall() and not _stepping_up:
+		_attempt_step_up(move_dir)
 
 func _flying_physics(delta: float):
 	var vel := velocity
 	
 	# Get input direction (3D)
 	var input_dir_2d := Input.get_vector(input_left, input_right, input_forward, input_back)
-	var move_dir := (head.global_basis * Vector3(input_dir_2d.x, 0, input_dir_2d.y)).normalized() # 移除 - 符号
+	var move_dir := (head.global_basis * Vector3(input_dir_2d.x, 0, input_dir_2d.y)).normalized()
 	
 	# Handle vertical movement
 	if Input.is_action_pressed(input_jump):
@@ -182,10 +195,10 @@ func _set_state(new_state: MoveState):
 			collider.disabled = false
 			has_gravity = true
 		MoveState.FLYING:
-			collider.disabled = false # Enable collision for normal flying
+			collider.disabled = false
 			has_gravity = false
 		MoveState.NOCLIP:
-			collider.disabled = true # Disable collision for noclip
+			collider.disabled = true
 			has_gravity = false
 
 func _handle_mouse_look(relative_motion: Vector2):
@@ -221,40 +234,100 @@ func check_input_mappings():
 			for action_name in action_names:
 				if not InputMap.has_action(action_name):
 					push_warning("%s disabled. No InputAction found for: %s" % [feature, action_name])
-					# You might want to disable the feature here, e.g., can_move = false
 					break
 
-func _handle_step_up() -> void:
-	if not is_on_floor(): return
-	
-	var input_dir = Input.get_vector(input_left, input_right, input_forward, input_back)
-	if input_dir.length() == 0:
+# ===== 改进的阶梯系统 =====
+
+func _attempt_step_up(move_dir: Vector3) -> void:
+	"""尝试爬上前方的方块"""
+	if not is_on_floor():
 		return
-		
-	var direction = (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
 	
-	# 1. Check if we are actually blocked in the direction we want to go
-	if not test_move(global_transform, direction * 0.1):
-		return # Not blocked in this direction
-		
-	# 2. Scan upwards to find the step height
-	var test_height = 0.0
-	var step_increment = 0.1 # Check every 10cm
+	# 只有在有水平移动时才尝试爬阶梯
+	var horizontal_dir = (move_dir * Vector3(1, 0, 1)).normalized()
+	if horizontal_dir.length() < 0.5:
+		return
 	
-	while test_height < step_height:
-		test_height += step_increment
+	# 1. 检查前方是否被挡住
+	var check_distance = 0.15
+	if not test_move(global_transform, horizontal_dir * check_distance):
+		return # 没有被挡住
+	
+	# 2. 扫描上方找到台阶高度
+	var step_height_found = _scan_step_height(horizontal_dir)
+	
+	if step_height_found > 0.0 and step_height_found <= step_height:
+		# 3. 开始平滑的阶梯上升动画
+		_start_step_up(horizontal_dir, step_height_found)
+
+func _scan_step_height(direction: Vector3) -> float:
+	"""扫描前方找到可以爬上去的台阶高度，返回高度值或0"""
+	var scan_distance = 0.2
+	var step_increment = 0.05
+	var max_scan_height = step_height
+	
+	var current_height = step_increment
+	
+	while current_height <= max_scan_height:
+		var up_offset = Vector3(0, current_height, 0)
+		var test_pos = global_transform.translated(up_offset)
 		
-		var up_vec = Vector3(0, test_height, 0)
+		# 检查该高度是否会穿过天花板
+		if test_move(global_transform, up_offset):
+			return 0.0 # 头会撞到天花板
 		
-		# Check ceiling collision
-		if test_move(global_transform, up_vec):
-			return # Head hit ceiling
-			
-		# Check if we can move forward at the new height
-		var step_transform = global_transform.translated(up_vec)
-		if not test_move(step_transform, direction * 0.25):
-			# Success! We can step up.
-			# Move up and slightly forward to "land" on the step
-			global_position += up_vec
-			global_position += direction * 0.05
-			return
+		# 检查该高度是否可以向前走
+		if not test_move(test_pos, direction * scan_distance):
+			# 找到了可以站立的高度
+			return current_height
+		
+		current_height += step_increment
+	
+	return 0.0 # 没找到合适的高度
+
+func _start_step_up(direction: Vector3, height: float) -> void:
+	"""开始阶梯平滑上升"""
+	_stepping_up = true
+	_step_start_pos = global_position
+	_step_target_height = height
+	
+	# 计算目标位置：上升 + 向前推进
+	_step_target_pos = _step_start_pos + Vector3(0, height, 0) + direction * 0.1
+	
+	_step_elapsed_time = 0.0
+	velocity = Vector3.ZERO # 停止现有的速度
+
+func _update_step_smoothing(delta: float) -> void:
+	"""平滑地从起点移动到目标点"""
+	_step_elapsed_time += delta
+	
+	# 使用缓动函数实现平滑的曲线运动
+	var progress = clamp(_step_elapsed_time / step_smooth_time, 0.0, 1.0)
+	
+	# 使用平滑的缓动曲线（ease-out）
+	var eased_progress = _ease_out_cubic(progress)
+	
+	# 在起点和目标点之间插值
+	global_position = _step_start_pos.lerp(_step_target_pos, eased_progress)
+	
+	# 检查是否完成
+	if progress >= 1.0:
+		_stepping_up = false
+		global_position = _step_target_pos
+		velocity = Vector3.ZERO
+
+func _ease_out_cubic(t: float) -> float:
+	"""缓出三次方函数，提供自然的减速运动"""
+	var t_normalized = t - 1.0
+	return t_normalized * t_normalized * t_normalized + 1.0
+
+# 也可以选择其他缓动函数：
+# func _ease_in_out_cubic(t: float) -> float:
+#     if t < 0.5:
+#         return 4.0 * t * t * t
+#     else:
+#         var t_norm = 2.0 * t - 2.0
+#         return 0.5 * t_norm * t_norm * t_norm + 1.0
+#
+# func _ease_out_quad(t: float) -> float:
+#     return 1.0 - (1.0 - t) * (1.0 - t)

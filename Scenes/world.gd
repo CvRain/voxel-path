@@ -42,6 +42,3 @@ func _on_block_loading_complete() -> void:
 		var diffuse_uv = stone.get_texture_uv("top", "diffuse")
 		if diffuse_uv:
 			MyLogger.info("  Diffuse UV: %s" % diffuse_uv)
-
-func _process(delta: float) -> void:
-	pass

@@ -156,14 +156,29 @@ func is_face_visible(x: int, y: int, z: int) -> bool:
 	
 	return false
 
+"""
+为方块贴上纹理，并根据方块类型进行简单的生物群系染色处理。
+不过有些写法需要优化。
+首先是提供的纹理素材是16x16的，考虑到方块会存在不同的变体，比如树干，那么在角落上和面上的贴图中，纹理是不一样的，而树心就应该是比较单一的颜色。
+而且现在也简单的使用的一种素材，之后还要考虑到顶部贴图和侧面贴图是不一样的情况。
+
+其次是生物群系染色处理，现在只是简单的对草方块进行染色处理，之后还要考虑更多的方块类型和更复杂的染色逻辑。
+"""
 func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> void:
 	var s = Constants.VOXEL_SIZE
 	var uv_rect = Rect2(0, 0, 1, 1)
 	var texture_uv = block.get_texture_uv(face)
 	if texture_uv:
 		uv_rect = texture_uv.uv_rect
+		
+		# Temporary: Crop to top-left 2x2 pixels of the 16x16 texture
+		# This reduces high-frequency noise on small blocks (0.25m).
+		# TODO: Make this configurable per block/texture in the future.
+		var crop_ratio = 4.0 / 16.0
+		uv_rect.size *= crop_ratio
 	
 	# Determine color (Biome tinting)
+    # todo: 这是需要优化的写法
 	var color = Color.WHITE
 	if block.name == "grass":
 		if face != "bottom":

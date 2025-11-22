@@ -16,6 +16,7 @@ enum MoveState {GROUND, FLYING, NOCLIP}
 @export var can_sprint: bool = true
 @export var can_fly: bool = true
 @export var can_noclip: bool = true
+@export var step_height: float = 1.1 # Max height to step up (0.25 is block size)
 
 @export_group("Speeds")
 @export var look_speed: float = 0.0035
@@ -140,6 +141,9 @@ func _ground_physics(delta: float):
 	
 	velocity = vel
 	move_and_slide()
+	
+	if is_on_wall():
+		_handle_step_up()
 
 
 func _flying_physics(delta: float):
@@ -219,3 +223,38 @@ func check_input_mappings():
 					push_warning("%s disabled. No InputAction found for: %s" % [feature, action_name])
 					# You might want to disable the feature here, e.g., can_move = false
 					break
+
+func _handle_step_up() -> void:
+	if not is_on_floor(): return
+	
+	var input_dir = Input.get_vector(input_left, input_right, input_forward, input_back)
+	if input_dir.length() == 0:
+		return
+		
+	var direction = (transform.basis * Vector3(input_dir.x, 0, input_dir.y)).normalized()
+	
+	# 1. Check if we are actually blocked in the direction we want to go
+	if not test_move(global_transform, direction * 0.1):
+		return # Not blocked in this direction
+		
+	# 2. Scan upwards to find the step height
+	var test_height = 0.0
+	var step_increment = 0.1 # Check every 10cm
+	
+	while test_height < step_height:
+		test_height += step_increment
+		
+		var up_vec = Vector3(0, test_height, 0)
+		
+		# Check ceiling collision
+		if test_move(global_transform, up_vec):
+			return # Head hit ceiling
+			
+		# Check if we can move forward at the new height
+		var step_transform = global_transform.translated(up_vec)
+		if not test_move(step_transform, direction * 0.25):
+			# Success! We can step up.
+			# Move up and slightly forward to "land" on the step
+			global_position += up_vec
+			global_position += direction * 0.05
+			return

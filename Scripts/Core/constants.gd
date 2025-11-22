@@ -6,9 +6,9 @@ const VERSION: String = "0.1.0"
 const GAME_NAME: String = "Voxel Path: Artisan's Realm"
 
 const VOXEL_SIZE: float = 0.25
-const CHUNK_SIZE: int = 16
+const CHUNK_SIZE: int = 64 # 16 meters wide (64 * 0.25)
 const CHUNK_WORLD_SIZE: float = CHUNK_SIZE * VOXEL_SIZE
-const VOXEL_MAX_HEIGHT: int = 256
+const VOXEL_MAX_HEIGHT: int = 1024 # 256 meters high (1024 * 0.25) - Adjusted from 4096 for initial stability
 
 const AIR_BLOCK_ID: int = 0
 const FIRST_MOD_BLOCK_ID: int = 256

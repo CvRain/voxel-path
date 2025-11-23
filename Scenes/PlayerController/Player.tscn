@@ -1,7 +1,8 @@
-[gd_scene load_steps=6 format=3 uid="uid://bs72ogkvdd7d6"]
+[gd_scene load_steps=7 format=3 uid="uid://bs72ogkvdd7d6"]
 
 [ext_resource type="Script" uid="uid://dwy66apo4c0qu" path="res://Scenes/PlayerController/ProtoController.gd" id="1_ucva2"]
 [ext_resource type="Script" uid="uid://ce3jm04lfl304" path="res://Scenes/PlayerController/Crosshaird.gd" id="2_586vu"]
+[ext_resource type="Script" uid="uid://dkeqkbujiicso" path="res://Scenes/PlayerController/BlockSelector.gd" id="2_aliv0"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_iof21"]
 albedo_color = Color(0.91806, 0.575202, 0.222449, 1)
@@ -16,22 +17,6 @@ height = 1.8
 
 [node name="ProtoController" type="CharacterBody3D"]
 script = ExtResource("1_ucva2")
-can_move = null
-has_gravity = null
-can_jump = null
-can_sprint = null
-can_fly = null
-can_noclip = null
-step_height = null
-step_smooth_time = null
-look_speed = null
-base_speed = null
-sprint_speed = null
-jump_velocity = null
-fly_speed = null
-acceleration = null
-deacceleration = null
-max_pitch_degrees = null
 input_left = "player_left"
 input_right = "player_right"
 input_forward = "player_forward"
@@ -39,9 +24,6 @@ input_back = "player_back"
 input_jump = "player_jump"
 input_sprint = "player_sprint"
 input_fly_down = "player_down"
-input_noclip_toggle = null
-debug_enabled = null
-debug_interval = null
 
 [node name="Mesh" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
@@ -55,6 +37,8 @@ shape = SubResource("CapsuleShape3D_iof21")
 
 [node name="Head" type="Node3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.7, 0)
+script = ExtResource("2_aliv0")
+camera_path = NodePath("Camera3D")
 
 [node name="Camera3D" type="Camera3D" parent="Head"]
 

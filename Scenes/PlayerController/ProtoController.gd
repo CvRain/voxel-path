@@ -70,7 +70,7 @@ var _step_target_height: float = 0.0
 @onready var raycast: RayCast3D = $Head/RayCast3D
 
 # --- Interaction ---
-var _highlighter: VoxelHighlighter
+var _block_selector: Node
 var _brush_size: int = 4 # Voxels (4 = 1m, 2 = 0.5m, 1 = 0.25m)
 var _interaction_dist: float = 5.0
 
@@ -89,14 +89,15 @@ func _ready() -> void:
 	raycast.target_position = Vector3(0, 0, -_interaction_dist)
 	raycast.enabled = true
 	raycast.add_exception(self) # Ignore player body (CharacterBody3D is a CollisionObject3D)
-	
-	# Setup Highlighter
-	_highlighter = VoxelHighlighter.new()
-	# Use add_child on the current scene (RandomWorld) or the player itself if we want it to move with player?
-	# No, highlighter position is global.
-	# Let's try adding it to the main scene root.
-	get_tree().current_scene.call_deferred("add_child", _highlighter)
 
+	# Find BlockSelector
+	if has_node("BlockSelector"):
+		_block_selector = get_node("BlockSelector")
+	elif get_parent().has_node("BlockSelector"):
+		_block_selector = get_parent().get_node("BlockSelector")
+	
+	if _block_selector and _block_selector.has_method("set_brush_size"):
+		_block_selector.set_brush_size(_brush_size)
 
 func _input(event: InputEvent) -> void:
 	if Input.is_key_pressed(KEY_ESCAPE):
@@ -369,6 +370,9 @@ func _toggle_brush_size() -> void:
 	elif _brush_size == 1:
 		_brush_size = 4
 		print("Brush size: 4x4x4 (1m)")
+	
+	if _block_selector and _block_selector.has_method("set_brush_size"):
+		_block_selector.set_brush_size(_brush_size)
 
 var _last_interact_time: float = 0.0
 var _interact_delay: float = 0.2 # 200ms delay between interactions
@@ -382,69 +386,58 @@ func _can_interact_delay() -> bool:
 
 func _handle_interaction() -> void:
 	if not raycast.is_colliding():
-		_highlighter.visible = false
-		# print("Raycast not colliding") 
+		# _highlighter.visible = false # Deprecated
 		return
 		
-	var _hit_collider = raycast.get_collider()
-	# print("Hit: ", _hit_collider.name) 
-	
 	var hit_point = raycast.get_collision_point()
 	var normal = raycast.get_collision_normal()
 	
-	# Debug print every 60 frames or so to avoid spam, or just rely on the fact that if we see it, it works.
-	# print("Hit at: ", hit_point, " Normal: ", normal)
+	# 1. 计算被击中的方块坐标
+	# 向法线反方向移动一点点，确保点在方块内部
+	var hit_block_center = hit_point - (normal * Constants.VOXEL_SIZE * 0.1)
 	
-	# Move slightly into the block to get the coordinate of the block we hit
-	var block_pos_global = hit_point - (normal * (Constants.VOXEL_SIZE * 0.5))
+	var vx = floori(hit_block_center.x / Constants.VOXEL_SIZE)
+	var vy = floori(hit_block_center.y / Constants.VOXEL_SIZE)
+	var vz = floori(hit_block_center.z / Constants.VOXEL_SIZE)
+	var center_grid_pos = Vector3i(vx, vy, vz)
 	
-	# Snap to voxel grid
-	var vx = floor(block_pos_global.x / Constants.VOXEL_SIZE)
-	var vy = floor(block_pos_global.y / Constants.VOXEL_SIZE)
-	var vz = floor(block_pos_global.z / Constants.VOXEL_SIZE)
-	
-	# Center the brush on the hit voxel
-	var offset = int(_brush_size / 2)
-	var bx = vx - offset
-	var by = vy - offset
-	var bz = vz - offset
-	
-	var highlight_pos = Vector3(bx, by, bz) * Constants.VOXEL_SIZE
-	
-	# Collect existing voxels in the selection
-	var existing_voxels: Array[Vector3] = []
+	# 2. 计算笔刷范围内的方块
+	var target_voxels: Array[Vector3i] = []
 	var world = get_tree().current_scene
 	
-	# Center offset for BoxMesh (since BoxMesh origin is center)
-	# We want the offset in "voxel units" to add to x,y,z
-	var center_offset_normalized = Vector3(0.5, 0.5, 0.5)
+	# 计算偏移起始点，使 center_grid_pos 位于笔刷中心
+	# 使用 floori 确保整数运算
+	var offset_start = - floori(_brush_size / 2.0)
 	
 	for x in range(_brush_size):
 		for y in range(_brush_size):
 			for z in range(_brush_size):
-				var loop_vx = bx + x
-				var loop_vy = by + y
-				var loop_vz = bz + z
+				var target_pos = center_grid_pos + Vector3i(offset_start + x, offset_start + y, offset_start + z)
 				
-				# Check if voxel exists (not air)
+				# 检查方块是否存在 (只高亮存在的方块)
 				if world.has_method("get_voxel_at"):
-					var block_id = world.get_voxel_at(Vector3i(loop_vx, loop_vy, loop_vz))
+					var block_id = world.get_voxel_at(target_pos)
 					if block_id != Constants.AIR_BLOCK_ID:
-						existing_voxels.append(Vector3(x, y, z) + center_offset_normalized)
+						target_voxels.append(target_pos)
 	
-	_highlighter.visible = true
-	_highlighter.update_voxels(highlight_pos, existing_voxels)
+	# 3. 更新高亮 (Deprecated: BlockSelector handles this now)
+	# _highlighter.visible = true
+	# _highlighter.update_highlight(target_voxels)
+	
+	# Handle Input
 	
 	# Handle Input
 	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT): # Destroy
 		if _can_interact_delay():
-			_modify_voxels(Vector3(bx, by, bz), Constants.AIR_BLOCK_ID)
+			# 这里的逻辑需要根据笔刷范围进行批量破坏，目前先保留中心点破坏逻辑，或者你需要我帮你改成批量破坏？
+			# 暂时只破坏中心点，或者遍历 target_voxels 进行破坏
+			for voxel_pos in target_voxels:
+				_modify_voxels(Vector3(voxel_pos.x, voxel_pos.y, voxel_pos.z), Constants.AIR_BLOCK_ID)
 	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): # Place
 		if _can_interact_delay():
-			# For placement, we need to calculate the position adjacent to the hit face
-			# But wait, if we are snapping to a 4x4 grid, simply moving by normal * brush_size might not align perfectly if we are at the edge of a chunk?
-			# Actually, we should probably use the face normal to determine which "grid cell" to place in.
-			# Re-calculate for placement based on normal
+			# 放置逻辑比较复杂，通常是在击中面的外侧放置
+			# 这里暂时只处理单点放置
+			#简单的单点放置逻辑：
 			var place_pos_global = hit_point + (normal * (Constants.VOXEL_SIZE * 0.5))
 			var pvx = floor(place_pos_global.x / Constants.VOXEL_SIZE)
 			var pvy = floor(place_pos_global.y / Constants.VOXEL_SIZE)

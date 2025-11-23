@@ -174,7 +174,7 @@ func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> 
 		# Temporary: Crop to top-left 2x2 pixels of the 16x16 texture
 		# This reduces high-frequency noise on small blocks (0.25m).
 		# TODO: Make this configurable per block/texture in the future.
-		var crop_ratio = 4.0 / 16.0
+		var crop_ratio = 8.0 / 16.0
 		uv_rect.size *= crop_ratio
 	
 	# Determine color (Biome tinting)

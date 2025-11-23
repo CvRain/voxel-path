@@ -40,6 +40,8 @@ enum MoveState {GROUND, FLYING, NOCLIP}
 @export var input_sprint: String = "sprint"
 @export var input_fly_down: String = "sprint"
 @export var input_noclip_toggle: String = "noclip_toggle"
+@export var input_right_click: String = "right_click"
+@export var input_left_click: String = "left_click"
 
 @export_group("Debug")
 @export var debug_enabled: bool = false
@@ -65,6 +67,12 @@ var _step_target_height: float = 0.0
 # --- Node References ---
 @onready var head: Node3D = $Head
 @onready var collider: CollisionShape3D = $Collider
+@onready var raycast: RayCast3D = $Head/RayCast3D
+
+# --- Interaction ---
+var _highlighter: VoxelHighlighter
+var _brush_size: int = 4 # Voxels (4 = 1m, 2 = 0.5m, 1 = 0.25m)
+var _interaction_dist: float = 5.0
 
 # --- Godot Lifecycle ---
 func _ready() -> void:
@@ -75,6 +83,20 @@ func _ready() -> void:
 	_look_rotation.x = head.rotation.x
 	
 	capture_mouse()
+	
+	# Setup RayCast
+	raycast.transform = Transform3D.IDENTITY # Reset transform to ensure it points forward relative to Head
+	raycast.target_position = Vector3(0, 0, -_interaction_dist)
+	raycast.enabled = true
+	raycast.add_exception(self) # Ignore player body (CharacterBody3D is a CollisionObject3D)
+	
+	# Setup Highlighter
+	_highlighter = VoxelHighlighter.new()
+	# Use add_child on the current scene (RandomWorld) or the player itself if we want it to move with player?
+	# No, highlighter position is global.
+	# Let's try adding it to the main scene root.
+	get_tree().current_scene.call_deferred("add_child", _highlighter)
+
 
 func _input(event: InputEvent) -> void:
 	if Input.is_key_pressed(KEY_ESCAPE):
@@ -85,9 +107,14 @@ func _input(event: InputEvent) -> void:
 
 	if _mouse_captured and event is InputEventMouseMotion:
 		_handle_mouse_look(event.relative)
+		
+	if Input.is_action_just_pressed("ui_focus_next"): # Tab key usually
+		_toggle_brush_size()
 
 func _physics_process(delta: float) -> void:
 	_last_jump_press += delta
+	
+	_handle_interaction()
 	
 	if debug_enabled:
 		_debug_timer += delta
@@ -331,3 +358,150 @@ func _ease_out_cubic(t: float) -> float:
 #
 # func _ease_out_quad(t: float) -> float:
 #     return 1.0 - (1.0 - t) * (1.0 - t)
+
+func _toggle_brush_size() -> void:
+	if _brush_size == 4:
+		_brush_size = 2
+		print("Brush size: 2x2x2 (0.5m)")
+	elif _brush_size == 2:
+		_brush_size = 1
+		print("Brush size: 1x1x1 (0.25m)")
+	elif _brush_size == 1:
+		_brush_size = 4
+		print("Brush size: 4x4x4 (1m)")
+
+var _last_interact_time: float = 0.0
+var _interact_delay: float = 0.2 # 200ms delay between interactions
+
+func _can_interact_delay() -> bool:
+	var current_time = Time.get_ticks_msec() / 1000.0
+	if current_time - _last_interact_time > _interact_delay:
+		_last_interact_time = current_time
+		return true
+	return false
+
+func _handle_interaction() -> void:
+	if not raycast.is_colliding():
+		_highlighter.visible = false
+		# print("Raycast not colliding") 
+		return
+		
+	var _hit_collider = raycast.get_collider()
+	# print("Hit: ", _hit_collider.name) 
+	
+	var hit_point = raycast.get_collision_point()
+	var normal = raycast.get_collision_normal()
+	
+	# Debug print every 60 frames or so to avoid spam, or just rely on the fact that if we see it, it works.
+	# print("Hit at: ", hit_point, " Normal: ", normal)
+	
+	# Move slightly into the block to get the coordinate of the block we hit
+	var block_pos_global = hit_point - (normal * (Constants.VOXEL_SIZE * 0.5))
+	
+	# Snap to voxel grid
+	var vx = floor(block_pos_global.x / Constants.VOXEL_SIZE)
+	var vy = floor(block_pos_global.y / Constants.VOXEL_SIZE)
+	var vz = floor(block_pos_global.z / Constants.VOXEL_SIZE)
+	
+	# Center the brush on the hit voxel
+	var offset = int(_brush_size / 2)
+	var bx = vx - offset
+	var by = vy - offset
+	var bz = vz - offset
+	
+	var highlight_pos = Vector3(bx, by, bz) * Constants.VOXEL_SIZE
+	
+	# Collect existing voxels in the selection
+	var existing_voxels: Array[Vector3] = []
+	var world = get_tree().current_scene
+	
+	# Center offset for BoxMesh (since BoxMesh origin is center)
+	# We want the offset in "voxel units" to add to x,y,z
+	var center_offset_normalized = Vector3(0.5, 0.5, 0.5)
+	
+	for x in range(_brush_size):
+		for y in range(_brush_size):
+			for z in range(_brush_size):
+				var loop_vx = bx + x
+				var loop_vy = by + y
+				var loop_vz = bz + z
+				
+				# Check if voxel exists (not air)
+				if world.has_method("get_voxel_at"):
+					var block_id = world.get_voxel_at(Vector3i(loop_vx, loop_vy, loop_vz))
+					if block_id != Constants.AIR_BLOCK_ID:
+						existing_voxels.append(Vector3(x, y, z) + center_offset_normalized)
+	
+	_highlighter.visible = true
+	_highlighter.update_voxels(highlight_pos, existing_voxels)
+	
+	# Handle Input
+	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT): # Destroy
+		if _can_interact_delay():
+			_modify_voxels(Vector3(bx, by, bz), Constants.AIR_BLOCK_ID)
+	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): # Place
+		if _can_interact_delay():
+			# For placement, we need to calculate the position adjacent to the hit face
+			# But wait, if we are snapping to a 4x4 grid, simply moving by normal * brush_size might not align perfectly if we are at the edge of a chunk?
+			# Actually, we should probably use the face normal to determine which "grid cell" to place in.
+			# Re-calculate for placement based on normal
+			var place_pos_global = hit_point + (normal * (Constants.VOXEL_SIZE * 0.5))
+			var pvx = floor(place_pos_global.x / Constants.VOXEL_SIZE)
+			var pvy = floor(place_pos_global.y / Constants.VOXEL_SIZE)
+			var pvz = floor(place_pos_global.z / Constants.VOXEL_SIZE)
+			
+			var p_offset = int(_brush_size / 2)
+			var pbx = pvx - p_offset
+			var pby = pvy - p_offset
+			var pbz = pvz - p_offset
+			
+			# Default to Stone for now, or use a selected block
+			_modify_voxels(Vector3(pbx, pby, pbz), 1) # 1 = Stone
+
+func _modify_voxels(start_voxel: Vector3, block_id: int) -> void:
+	# We need to find which chunk(s) these voxels belong to.
+	# Since we might cross chunk boundaries, we should handle this carefully.
+	# For simplicity, let's assume we can access the world or use a global helper.
+	# But we don't have one.
+	# We can try to get the chunk from the collider if we hit one.
+	# However, for placement, we might be placing into AIR, so we might not hit the chunk we are placing into.
+	# We need a way to get a chunk at a specific world position.
+	# Let's assume the RandomWorld is the parent of the chunks and we can find it.
+	var world = get_tree().current_scene
+	if world.has_method("get_chunk_at"):
+		# We need to implement get_chunk_at in RandomWorld
+		pass
+	
+	# Fallback: Iterate through all voxels and find their chunk
+	# This is slow but works for now.
+	# Better: Calculate chunk coord from voxel coord.
+	
+	var chunks_to_update = {}
+	
+	for x in range(_brush_size):
+		for y in range(_brush_size):
+			for z in range(_brush_size):
+				var vx = int(start_voxel.x) + x
+				var vy = int(start_voxel.y) + y
+				var vz = int(start_voxel.z) + z
+				
+				var cx = floor(vx / float(Constants.CHUNK_SIZE))
+				var cz = floor(vz / float(Constants.CHUNK_SIZE))
+				var chunk_key = Vector2i(cx, cz)
+				
+				# Local voxel coordinates
+				var lx = vx % Constants.CHUNK_SIZE
+				var lz = vz % Constants.CHUNK_SIZE
+				if lx < 0: lx += Constants.CHUNK_SIZE
+				if lz < 0: lz += Constants.CHUNK_SIZE
+				
+				# Find chunk
+				# We need access to the world's chunk map.
+				# Let's assume we can call a function on the main scene.
+				if world.has_method("set_voxel_at"):
+					world.set_voxel_at(Vector3i(vx, vy, vz), block_id)
+					chunks_to_update[chunk_key] = true
+
+	# Request mesh updates
+	if world.has_method("update_chunks"):
+		world.update_chunks(chunks_to_update.keys())

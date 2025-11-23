@@ -159,3 +159,48 @@ func _fill_chunk_data(chunk: Chunk) -> void:
 						
 						if block_id != Constants.AIR_BLOCK_ID:
 							chunk.set_voxel(vx, y, vz, block_id)
+
+func set_voxel_at(pos: Vector3i, block_id: int) -> void:
+	var cx = floor(pos.x / float(Constants.CHUNK_SIZE))
+	var cz = floor(pos.z / float(Constants.CHUNK_SIZE))
+	var chunk_pos = Vector2i(cx, cz)
+	
+	if not _chunks.has(chunk_pos):
+		return # Chunk not loaded or out of bounds
+		
+	var chunk = _chunks[chunk_pos]
+	
+	# Local coordinates
+	var lx = pos.x % Constants.CHUNK_SIZE
+	var lz = pos.z % Constants.CHUNK_SIZE
+	var ly = pos.y
+	
+	if lx < 0: lx += Constants.CHUNK_SIZE
+	if lz < 0: lz += Constants.CHUNK_SIZE
+	
+	chunk.set_voxel(lx, ly, lz, block_id)
+
+func update_chunks(chunk_keys: Array) -> void:
+	for key in chunk_keys:
+		if _chunks.has(key):
+			_chunks[key].generate_mesh()
+
+func get_voxel_at(pos: Vector3i) -> int:
+	var cx = floor(pos.x / float(Constants.CHUNK_SIZE))
+	var cz = floor(pos.z / float(Constants.CHUNK_SIZE))
+	var chunk_pos = Vector2i(cx, cz)
+	
+	if not _chunks.has(chunk_pos):
+		return Constants.AIR_BLOCK_ID
+		
+	var chunk = _chunks[chunk_pos]
+	
+	# Local coordinates
+	var lx = pos.x % Constants.CHUNK_SIZE
+	var lz = pos.z % Constants.CHUNK_SIZE
+	var ly = pos.y
+	
+	if lx < 0: lx += Constants.CHUNK_SIZE
+	if lz < 0: lz += Constants.CHUNK_SIZE
+	
+	return chunk.get_voxel(lx, ly, lz)

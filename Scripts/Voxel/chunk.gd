@@ -1,13 +1,17 @@
-# Scripts/Voxel/chunk.gd
 class_name Chunk
 extends Node3D
 
 var chunk_position: Vector2i
 var voxels: PackedByteArray # Stores block IDs. 0 is air.
 var is_modified: bool = false
-var mesh_instance: MeshInstance3D
-var collision_body: StaticBody3D
-var max_height: int = 0 # Track max height for optimization
+
+# Sections
+var sections: Array[MeshInstance3D] = []
+var section_bodies: Array[StaticBody3D] = []
+var sections_node: Node3D
+
+# Threading tracking
+var _active_tasks: Dictionary = {} # section_idx -> task_id
 
 # Neighbors for face culling
 var neighbor_front: Chunk
@@ -27,15 +31,25 @@ func _init(pos: Vector2i) -> void:
 	voxels.fill(Constants.AIR_BLOCK_ID)
 
 func _ready() -> void:
-	mesh_instance = MeshInstance3D.new()
-	add_child(mesh_instance)
+	sections_node = Node3D.new()
+	sections_node.name = "Sections"
+	add_child(sections_node)
 	
-	# Set material
+	var num_sections = ceil(Constants.VOXEL_MAX_HEIGHT / float(Constants.CHUNK_SECTION_SIZE))
+	sections.resize(num_sections)
+	section_bodies.resize(num_sections)
+	
 	var material = StandardMaterial3D.new()
 	material.albedo_texture = TextureManager.get_main_atlas()
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	material.vertex_color_use_as_albedo = true # Enabled for biome tinting
-	mesh_instance.material_override = material
+	
+	for i in range(num_sections):
+		var mesh_inst = MeshInstance3D.new()
+		mesh_inst.name = "Section_%d" % i
+		mesh_inst.material_override = material
+		sections_node.add_child(mesh_inst)
+		sections[i] = mesh_inst
 
 func set_voxel(x: int, y: int, z: int, block_id: int) -> void:
 	if not is_valid_position(x, y, z):
@@ -45,8 +59,173 @@ func set_voxel(x: int, y: int, z: int, block_id: int) -> void:
 	if voxels[index] != block_id:
 		voxels[index] = block_id
 		is_modified = true
-		if block_id != Constants.AIR_BLOCK_ID and y > max_height:
-			max_height = y
+		
+		# Update the specific section
+		update_mesh_for_voxel(y)
+
+# Raw setter that DOES NOT trigger mesh updates.
+# Use this for world generation or batch updates.
+func set_voxel_raw(x: int, y: int, z: int, block_id: int) -> void:
+	if not is_valid_position(x, y, z):
+		return
+	
+	var index = get_voxel_index(x, y, z)
+	if voxels[index] != block_id:
+		voxels[index] = block_id
+		is_modified = true
+
+func update_mesh_for_voxel(y: int) -> void:
+	var section_idx = int(y / Constants.CHUNK_SECTION_SIZE)
+	schedule_section_update(section_idx)
+	
+	# Check if we need to update neighbors (if on boundary)
+	var local_y = y % Constants.CHUNK_SECTION_SIZE
+	if local_y == 0 and section_idx > 0:
+		schedule_section_update(section_idx - 1)
+	elif local_y == Constants.CHUNK_SECTION_SIZE - 1 and section_idx < sections.size() - 1:
+		schedule_section_update(section_idx + 1)
+
+func schedule_section_update(section_idx: int) -> void:
+	# For single updates, we still need a snapshot to be thread-safe
+	var voxel_snapshot = voxels.duplicate()
+	_schedule_section_update_internal(section_idx, voxel_snapshot)
+
+func _schedule_section_update_internal(section_idx: int, voxel_snapshot: PackedByteArray) -> void:
+	WorkerThreadPool.add_task(
+		_thread_generate_mesh.bind(section_idx, voxel_snapshot),
+		true,
+		"Mesh Gen Section %d" % section_idx
+	)
+
+func update_specific_sections(section_indices: Array) -> void:
+	if section_indices.is_empty():
+		return
+		
+	# Create ONE snapshot for this batch
+	var shared_snapshot = voxels.duplicate()
+	
+	for section_idx in section_indices:
+		if section_idx >= 0 and section_idx < sections.size():
+			_schedule_section_update_internal(section_idx, shared_snapshot)
+
+func generate_mesh() -> void:
+	# OPTIMIZATION: Create ONE snapshot for all sections
+	# This prevents 16x memory usage explosion (16 sections * 4MB = 64MB per chunk!)
+	var shared_snapshot = voxels.duplicate()
+	
+	# Generate all sections using the shared snapshot
+	for i in range(sections.size()):
+		_schedule_section_update_internal(i, shared_snapshot)
+
+# --- Threaded Function ---
+# This runs on a background thread. CANNOT touch SceneTree nodes.
+func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray) -> void:
+	var st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	
+	var voxel_size = Constants.VOXEL_SIZE
+	var start_y = section_idx * Constants.CHUNK_SECTION_SIZE
+	var end_y = min((section_idx + 1) * Constants.CHUNK_SECTION_SIZE, Constants.VOXEL_MAX_HEIGHT)
+	
+	var has_faces = false
+	
+	# Pre-calculate bounds to avoid repeated lookups
+	var chunk_size = Constants.CHUNK_SIZE
+	
+	for y in range(start_y, end_y):
+		for z in range(chunk_size):
+			for x in range(chunk_size):
+				# Use local snapshot data
+				var index = (y * chunk_size * chunk_size) + (z * chunk_size) + x
+				var block_id = voxel_data[index]
+				
+				if block_id == Constants.AIR_BLOCK_ID:
+					continue
+				
+				# BlockRegistry is static, safe to read if not modifying
+				var block = BlockRegistry.get_block(block_id)
+				if not block: continue
+				
+				var pos = Vector3(x, y, z) * voxel_size
+				
+				# Check neighbors for culling
+				# We pass the snapshot to the visibility check
+				if _thread_is_face_visible(x, y + 1, z, voxel_data):
+					add_face(st, pos, "top", block)
+					has_faces = true
+				
+				if _thread_is_face_visible(x, y - 1, z, voxel_data):
+					add_face(st, pos, "bottom", block)
+					has_faces = true
+				
+				if _thread_is_face_visible(x + 1, y, z, voxel_data):
+					add_face(st, pos, "right", block)
+					has_faces = true
+				
+				if _thread_is_face_visible(x - 1, y, z, voxel_data):
+					add_face(st, pos, "left", block)
+					has_faces = true
+				
+				if _thread_is_face_visible(x, y, z + 1, voxel_data):
+					add_face(st, pos, "back", block)
+					has_faces = true
+				
+				if _thread_is_face_visible(x, y, z - 1, voxel_data):
+					add_face(st, pos, "front", block)
+					has_faces = true
+
+	var mesh_arrays = []
+	if has_faces:
+		st.generate_normals()
+		st.generate_tangents()
+		# commit_to_arrays returns the ArrayMesh data array (vertices, normals, etc)
+		# This is a pure data object, safe to pass back.
+		mesh_arrays = st.commit_to_arrays()
+	
+	# Dispatch back to main thread
+	call_deferred("_apply_mesh_update", section_idx, mesh_arrays)
+
+# --- Main Thread Function ---
+func _apply_mesh_update(section_idx: int, mesh_arrays: Array) -> void:
+	var mesh_inst = sections[section_idx]
+	
+	# Clear existing collision
+	if section_bodies[section_idx]:
+		section_bodies[section_idx].queue_free()
+		section_bodies[section_idx] = null
+
+	if mesh_arrays.size() > 0:
+		var arr_mesh = ArrayMesh.new()
+		arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays)
+		mesh_inst.mesh = arr_mesh
+		
+		# Create collision (Must be on main thread)
+		mesh_inst.create_trimesh_collision()
+		if mesh_inst.get_child_count() > 0:
+			var child = mesh_inst.get_child(mesh_inst.get_child_count() - 1)
+			if child is StaticBody3D:
+				section_bodies[section_idx] = child
+	else:
+		mesh_inst.mesh = null
+
+# Thread-safe visibility check
+func _thread_is_face_visible(x: int, y: int, z: int, local_voxels: PackedByteArray) -> bool:
+	# If y is out of bounds (top/bottom of world), face is visible
+	if y < 0 or y >= Constants.VOXEL_MAX_HEIGHT:
+		return true
+	
+	# Check local bounds first
+	if x >= 0 and x < Constants.CHUNK_SIZE and \
+	   z >= 0 and z < Constants.CHUNK_SIZE:
+		var index = (y * Constants.CHUNK_SIZE * Constants.CHUNK_SIZE) + (z * Constants.CHUNK_SIZE) + x
+		var neighbor_id = local_voxels[index]
+		return neighbor_id == Constants.AIR_BLOCK_ID
+	
+	# Neighbor chunks logic (Cross-chunk culling)
+	# SAFETY FIX: Accessing neighbor chunks from a thread is NOT safe because PackedByteArray is not thread-safe.
+	# For now, we assume chunk boundaries are always visible (no culling between chunks).
+	# This prevents the "Out of bounds" crash and race conditions.
+	return true
 
 func get_voxel(x: int, y: int, z: int) -> int:
 	if not is_valid_position(x, y, z):
@@ -78,67 +257,6 @@ func is_valid_position(x: int, y: int, z: int) -> bool:
 		   z >= 0 and z < Constants.CHUNK_SIZE and \
 		   y >= 0 and y < Constants.VOXEL_MAX_HEIGHT
 
-func generate_mesh() -> void:
-	var st = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	
-	var voxel_size = Constants.VOXEL_SIZE
-	
-	# Optimization: Only loop up to max_height + 1 (to check top faces)
-	var loop_height = min(max_height + 2, Constants.VOXEL_MAX_HEIGHT)
-	
-	for y in range(loop_height):
-		for z in range(Constants.CHUNK_SIZE):
-			for x in range(Constants.CHUNK_SIZE):
-				var block_id = get_voxel(x, y, z)
-				if block_id == Constants.AIR_BLOCK_ID:
-					continue
-				
-				var block = BlockRegistry.get_block(block_id)
-				if not block: continue
-				
-				var pos = Vector3(x, y, z) * voxel_size
-				
-				# Check neighbors for culling
-				# Top (+Y)
-				if is_face_visible(x, y + 1, z):
-					add_face(st, pos, "top", block)
-				
-				# Bottom (-Y)
-				if is_face_visible(x, y - 1, z):
-					add_face(st, pos, "bottom", block)
-				
-				# Right (+X)
-				if is_face_visible(x + 1, y, z):
-					add_face(st, pos, "right", block)
-				
-				# Left (-X)
-				if is_face_visible(x - 1, y, z):
-					add_face(st, pos, "left", block)
-				
-				# Back (+Z) - Note: In our corrected system, +Z is Back
-				if is_face_visible(x, y, z + 1):
-					add_face(st, pos, "back", block)
-				
-				# Front (-Z) - Note: In our corrected system, -Z is Front
-				if is_face_visible(x, y, z - 1):
-					add_face(st, pos, "front", block)
-
-	st.generate_normals()
-	st.generate_tangents()
-	
-	if mesh_instance.mesh:
-		mesh_instance.mesh.clear_surfaces()
-	
-	mesh_instance.mesh = st.commit()
-	
-	# Update collision
-	if collision_body:
-		collision_body.queue_free()
-	
-	if mesh_instance.mesh.get_surface_count() > 0:
-		mesh_instance.create_trimesh_collision()
-		collision_body = mesh_instance.get_child(0)
 
 func is_face_visible(x: int, y: int, z: int) -> bool:
 	# If y is out of bounds (top/bottom of world), face is visible
@@ -178,7 +296,7 @@ func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> 
 		uv_rect.size *= crop_ratio
 	
 	# Determine color (Biome tinting)
-    # todo: 这是需要优化的写法
+	# todo: 这是需要优化的写法
 	var color = Color.WHITE
 	if block.name == "grass":
 		if face != "bottom":

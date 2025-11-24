@@ -25,3 +25,5 @@ const DEBUG_TEXTURE_LOADING: bool = true
 const MAX_CHUNKS_PER_FRAME: int = 4
 const VIEW_DISTANCE: int = 8
 const LOD_LEVELS: int = 3
+
+const CHUNK_SECTION_SIZE: int = 64 # Height of each sub-chunk section

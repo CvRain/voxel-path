@@ -38,6 +38,11 @@ func _initialize_systems() -> void:
 	if not BlockRegistry.get_instance():
 		add_child(BlockRegistry.new())
 	
+	# Initialize BlockBehavior system
+	var BlockBehaviorScript = load("res://Scripts/Voxel/block_behavior.gd")
+	if not BlockBehaviorScript.get_instance():
+		add_child(BlockBehaviorScript.new())
+	
 	var block_manager = BlockManager.new()
 	block_manager.loading_complete.connect(_on_loading_complete)
 	add_child(block_manager)
@@ -158,7 +163,7 @@ func _fill_chunk_data(chunk: Chunk) -> void:
 							block_id = _id_grass
 						
 						if block_id != Constants.AIR_BLOCK_ID:
-							chunk.set_voxel(vx, y, vz, block_id)
+							chunk.set_voxel_raw(vx, y, vz, block_id)
 
 func set_voxel_at(pos: Vector3i, block_id: int) -> void:
 	var cx = floor(pos.x / float(Constants.CHUNK_SIZE))
@@ -180,10 +185,37 @@ func set_voxel_at(pos: Vector3i, block_id: int) -> void:
 	
 	chunk.set_voxel(lx, ly, lz, block_id)
 
+func set_voxel_at_raw(pos: Vector3i, block_id: int) -> void:
+	var cx = floor(pos.x / float(Constants.CHUNK_SIZE))
+	var cz = floor(pos.z / float(Constants.CHUNK_SIZE))
+	var chunk_pos = Vector2i(cx, cz)
+	
+	if not _chunks.has(chunk_pos):
+		return
+		
+	var chunk = _chunks[chunk_pos]
+	
+	# Local coordinates
+	var lx = pos.x % Constants.CHUNK_SIZE
+	var lz = pos.z % Constants.CHUNK_SIZE
+	var ly = pos.y
+	
+	if lx < 0: lx += Constants.CHUNK_SIZE
+	if lz < 0: lz += Constants.CHUNK_SIZE
+	
+	chunk.set_voxel_raw(lx, ly, lz, block_id)
+
 func update_chunks(chunk_keys: Array) -> void:
 	for key in chunk_keys:
 		if _chunks.has(key):
 			_chunks[key].generate_mesh()
+
+func update_chunks_sections(changes: Dictionary) -> void:
+	for chunk_pos in changes:
+		if _chunks.has(chunk_pos):
+			var section_indices = changes[chunk_pos]
+			# Use the optimized method to update only specific sections with one snapshot
+			_chunks[chunk_pos].update_specific_sections(section_indices)
 
 func get_voxel_at(pos: Vector3i) -> int:
 	var cx = floor(pos.x / float(Constants.CHUNK_SIZE))

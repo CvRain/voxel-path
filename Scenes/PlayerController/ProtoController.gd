@@ -425,76 +425,100 @@ func _handle_interaction() -> void:
 	# _highlighter.update_highlight(target_voxels)
 	
 	# Handle Input
-	
-	# Handle Input
 	if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT): # Destroy
 		if _can_interact_delay():
-			# 这里的逻辑需要根据笔刷范围进行批量破坏，目前先保留中心点破坏逻辑，或者你需要我帮你改成批量破坏？
-			# 暂时只破坏中心点，或者遍历 target_voxels 进行破坏
-			for voxel_pos in target_voxels:
-				_modify_voxels(Vector3(voxel_pos.x, voxel_pos.y, voxel_pos.z), Constants.AIR_BLOCK_ID)
+			_batch_modify_voxels(target_voxels, Constants.AIR_BLOCK_ID)
+			
 	elif Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT): # Place
 		if _can_interact_delay():
-			# 放置逻辑比较复杂，通常是在击中面的外侧放置
-			# 这里暂时只处理单点放置
-			#简单的单点放置逻辑：
+			# 放置逻辑：在击中点法线方向偏移
 			var place_pos_global = hit_point + (normal * (Constants.VOXEL_SIZE * 0.5))
-			var pvx = floor(place_pos_global.x / Constants.VOXEL_SIZE)
-			var pvy = floor(place_pos_global.y / Constants.VOXEL_SIZE)
-			var pvz = floor(place_pos_global.z / Constants.VOXEL_SIZE)
+			var center_grid_pos_place = Vector3i(
+				floori(place_pos_global.x / Constants.VOXEL_SIZE),
+				floori(place_pos_global.y / Constants.VOXEL_SIZE),
+				floori(place_pos_global.z / Constants.VOXEL_SIZE)
+			)
 			
-			var p_offset = int(_brush_size / 2)
-			var pbx = pvx - p_offset
-			var pby = pvy - p_offset
-			var pbz = pvz - p_offset
+			# 计算放置的体素列表
+			var place_voxels: Array[Vector3i] = []
+			# offset_start is already defined in the outer scope, reuse it or use a new name
+			var place_offset_start = - floori(_brush_size / 2.0)
 			
-			# Default to Stone for now, or use a selected block
-			_modify_voxels(Vector3(pbx, pby, pbz), 1) # 1 = Stone
+			for x in range(_brush_size):
+				for y in range(_brush_size):
+					for z in range(_brush_size):
+						var target_pos = center_grid_pos_place + Vector3i(place_offset_start + x, place_offset_start + y, place_offset_start + z)
+						place_voxels.append(target_pos)
+			
+			# Default to Stone (1) for now
+			_batch_modify_voxels(place_voxels, 1)
 
-func _modify_voxels(start_voxel: Vector3, block_id: int) -> void:
-	# We need to find which chunk(s) these voxels belong to.
-	# Since we might cross chunk boundaries, we should handle this carefully.
-	# For simplicity, let's assume we can access the world or use a global helper.
-	# But we don't have one.
-	# We can try to get the chunk from the collider if we hit one.
-	# However, for placement, we might be placing into AIR, so we might not hit the chunk we are placing into.
-	# We need a way to get a chunk at a specific world position.
-	# Let's assume the RandomWorld is the parent of the chunks and we can find it.
+func _batch_modify_voxels(voxel_positions: Array[Vector3i], block_id: int) -> void:
 	var world = get_tree().current_scene
-	if world.has_method("get_chunk_at"):
-		# We need to implement get_chunk_at in RandomWorld
-		pass
+	if not world.has_method("set_voxel_at_raw"):
+		return
 	
-	# Fallback: Iterate through all voxels and find their chunk
-	# This is slow but works for now.
-	# Better: Calculate chunk coord from voxel coord.
+	var changes = {} # Vector2i -> Dictionary(int -> bool) (using dict as set)
+	var max_sections = ceil(Constants.VOXEL_MAX_HEIGHT / float(Constants.CHUNK_SECTION_SIZE))
 	
-	var chunks_to_update = {}
-	
-	for x in range(_brush_size):
-		for y in range(_brush_size):
-			for z in range(_brush_size):
-				var vx = int(start_voxel.x) + x
-				var vy = int(start_voxel.y) + y
-				var vz = int(start_voxel.z) + z
-				
-				var cx = floor(vx / float(Constants.CHUNK_SIZE))
-				var cz = floor(vz / float(Constants.CHUNK_SIZE))
-				var chunk_key = Vector2i(cx, cz)
-				
-				# Local voxel coordinates
-				var lx = vx % Constants.CHUNK_SIZE
-				var lz = vz % Constants.CHUNK_SIZE
-				if lx < 0: lx += Constants.CHUNK_SIZE
-				if lz < 0: lz += Constants.CHUNK_SIZE
-				
-				# Find chunk
-				# We need access to the world's chunk map.
-				# Let's assume we can call a function on the main scene.
-				if world.has_method("set_voxel_at"):
-					world.set_voxel_at(Vector3i(vx, vy, vz), block_id)
-					chunks_to_update[chunk_key] = true
+	for pos in voxel_positions:
+		# 1. Modify data (No mesh update)
+		world.set_voxel_at_raw(pos, block_id)
+		
+		# 2. Record chunk and sections for update
+		var cx = floor(pos.x / float(Constants.CHUNK_SIZE))
+		var cz = floor(pos.z / float(Constants.CHUNK_SIZE))
+		var chunk_pos = Vector2i(cx, cz)
+		
+		if not changes.has(chunk_pos):
+			changes[chunk_pos] = {}
+			
+		var y = pos.y
+		var section_idx = floori(y / float(Constants.CHUNK_SECTION_SIZE))
+		changes[chunk_pos][section_idx] = true
+		
+		# Check vertical neighbors (for face culling updates)
+		var local_y = y % Constants.CHUNK_SECTION_SIZE
+		if local_y == 0 and section_idx > 0:
+			changes[chunk_pos][section_idx - 1] = true
+		elif local_y == Constants.CHUNK_SECTION_SIZE - 1 and section_idx < max_sections - 1:
+			changes[chunk_pos][section_idx + 1] = true
+			
+		# 4. Trigger Block Updates (Physics/Logic)
+		var BlockBehavior = load("res://Scripts/Voxel/block_behavior.gd")
+		if BlockBehavior and BlockBehavior.get_instance():
+			BlockBehavior.get_instance().schedule_update_and_neighbors(pos)
 
-	# Request mesh updates
-	if world.has_method("update_chunks"):
-		world.update_chunks(chunks_to_update.keys())
+	# 3. Batch update meshes
+	if world.has_method("update_chunks_sections"):
+		var final_changes = {}
+		for chunk_pos in changes:
+			final_changes[chunk_pos] = changes[chunk_pos].keys()
+		world.update_chunks_sections(final_changes)
+	elif world.has_method("update_chunks"):
+		world.update_chunks(changes.keys())
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion and _mouse_captured:
+		_look_rotation.y -= event.relative.x * look_speed
+		_look_rotation.x -= event.relative.y * look_speed
+		_look_rotation.x = clamp(_look_rotation.x, deg_to_rad(-max_pitch_degrees), deg_to_rad(max_pitch_degrees))
+		
+		rotation.y = _look_rotation.y
+		head.rotation.x = _look_rotation.x
+		
+	if event.is_action_pressed("ui_cancel"):
+		if _mouse_captured:
+			release_mouse()
+		else:
+			capture_mouse()
+			
+	if event.is_action_pressed(input_jump):
+		if _current_state == MoveState.FLYING:
+			# Ascend in fly mode
+			pass
+		elif is_on_floor():
+			velocity.y = jump_velocity
+		elif can_move and can_jump and not is_on_floor():
+			# Double jump / Fly toggle logic could go here
+			pass

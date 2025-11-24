@@ -2,7 +2,8 @@ class_name Chunk
 extends Node3D
 
 var chunk_position: Vector2i
-var voxels: PackedByteArray # Stores block IDs. 0 is air.
+var voxels: PackedByteArray # Stores PALETTE INDICES. 0 is always Air (Global ID 0).
+var palette: Resource # Maps Local Index -> Global ID (Type is Resource to avoid cyclic dependency issues if any, but ideally ChunkPalette)
 var is_modified: bool = false
 
 # Sections
@@ -23,12 +24,16 @@ func _init(pos: Vector2i) -> void:
 	chunk_position = pos
 	name = "Chunk_%d_%d" % [pos.x, pos.y]
 	
+	# Initialize Palette
+	var ChunkPaletteScript = load("res://Scripts/Voxel/chunk_palette.gd")
+	palette = ChunkPaletteScript.new()
+	
 	# Initialize voxel data
 	# Size = Width * Width * Height
 	var size = Constants.CHUNK_SIZE * Constants.CHUNK_SIZE * Constants.VOXEL_MAX_HEIGHT
 	voxels = PackedByteArray()
 	voxels.resize(size)
-	voxels.fill(Constants.AIR_BLOCK_ID)
+	voxels.fill(0) # Fill with Index 0 (which is Air in a new Palette)
 
 func _ready() -> void:
 	sections_node = Node3D.new()
@@ -51,13 +56,31 @@ func _ready() -> void:
 		sections_node.add_child(mesh_inst)
 		sections[i] = mesh_inst
 
-func set_voxel(x: int, y: int, z: int, block_id: int) -> void:
+func set_voxel(x: int, y: int, z: int, block_id: int, properties: Dictionary = {}) -> void:
+	if not is_valid_position(x, y, z):
+		return
+	
+	var state_id = 0
+	if properties.is_empty():
+		state_id = BlockStateRegistry.get_default_state_id(block_id)
+	else:
+		state_id = BlockStateRegistry.get_state_id_by_properties(block_id, properties)
+		if state_id == -1:
+			# Fallback to default if properties are invalid
+			state_id = BlockStateRegistry.get_default_state_id(block_id)
+			
+	set_voxel_state(x, y, z, state_id)
+
+func set_voxel_state(x: int, y: int, z: int, state_id: int) -> void:
 	if not is_valid_position(x, y, z):
 		return
 	
 	var index = get_voxel_index(x, y, z)
-	if voxels[index] != block_id:
-		voxels[index] = block_id
+	# Convert Global State ID -> Local Index
+	var local_index = palette.get_local_index(state_id)
+	
+	if voxels[index] != local_index:
+		voxels[index] = local_index
 		is_modified = true
 		
 		# Update the specific section
@@ -66,16 +89,23 @@ func set_voxel(x: int, y: int, z: int, block_id: int) -> void:
 # Raw setter that DOES NOT trigger mesh updates.
 # Use this for world generation or batch updates.
 func set_voxel_raw(x: int, y: int, z: int, block_id: int) -> void:
+	var state_id = BlockStateRegistry.get_default_state_id(block_id)
+	set_voxel_state_raw(x, y, z, state_id)
+
+func set_voxel_state_raw(x: int, y: int, z: int, state_id: int) -> void:
 	if not is_valid_position(x, y, z):
 		return
 	
 	var index = get_voxel_index(x, y, z)
-	if voxels[index] != block_id:
-		voxels[index] = block_id
+	# Convert Global State ID -> Local Index
+	var local_index = palette.get_local_index(state_id)
+	
+	if voxels[index] != local_index:
+		voxels[index] = local_index
 		is_modified = true
 
 func update_mesh_for_voxel(y: int) -> void:
-	var section_idx = int(y / Constants.CHUNK_SECTION_SIZE)
+	var section_idx = floori(y / float(Constants.CHUNK_SECTION_SIZE))
 	schedule_section_update(section_idx)
 	
 	# Check if we need to update neighbors (if on boundary)
@@ -88,11 +118,13 @@ func update_mesh_for_voxel(y: int) -> void:
 func schedule_section_update(section_idx: int) -> void:
 	# For single updates, we still need a snapshot to be thread-safe
 	var voxel_snapshot = voxels.duplicate()
-	_schedule_section_update_internal(section_idx, voxel_snapshot)
+	# Also snapshot the palette map to ensure thread safety
+	var palette_map = palette._id_map.duplicate()
+	_schedule_section_update_internal(section_idx, voxel_snapshot, palette_map)
 
-func _schedule_section_update_internal(section_idx: int, voxel_snapshot: PackedByteArray) -> void:
+func _schedule_section_update_internal(section_idx: int, voxel_snapshot: PackedByteArray, palette_map: Array) -> void:
 	WorkerThreadPool.add_task(
-		_thread_generate_mesh.bind(section_idx, voxel_snapshot),
+		_thread_generate_mesh.bind(section_idx, voxel_snapshot, palette_map),
 		true,
 		"Mesh Gen Section %d" % section_idx
 	)
@@ -103,23 +135,25 @@ func update_specific_sections(section_indices: Array) -> void:
 		
 	# Create ONE snapshot for this batch
 	var shared_snapshot = voxels.duplicate()
+	var palette_map = palette._id_map.duplicate()
 	
 	for section_idx in section_indices:
 		if section_idx >= 0 and section_idx < sections.size():
-			_schedule_section_update_internal(section_idx, shared_snapshot)
+			_schedule_section_update_internal(section_idx, shared_snapshot, palette_map)
 
 func generate_mesh() -> void:
 	# OPTIMIZATION: Create ONE snapshot for all sections
 	# This prevents 16x memory usage explosion (16 sections * 4MB = 64MB per chunk!)
 	var shared_snapshot = voxels.duplicate()
+	var palette_map = palette._id_map.duplicate()
 	
 	# Generate all sections using the shared snapshot
 	for i in range(sections.size()):
-		_schedule_section_update_internal(i, shared_snapshot)
+		_schedule_section_update_internal(i, shared_snapshot, palette_map)
 
 # --- Threaded Function ---
 # This runs on a background thread. CANNOT touch SceneTree nodes.
-func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray) -> void:
+func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palette_map: Array) -> void:
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	
@@ -133,7 +167,7 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray) -> voi
 	var chunk_size = Constants.CHUNK_SIZE
 	var stride_y = chunk_size * chunk_size
 	var stride_z = chunk_size
-	var air_id = Constants.AIR_BLOCK_ID
+	var air_id = Constants.AIR_BLOCK_ID # This is Global ID 0. In Palette, Index 0 is always Global ID 0.
 	
 	for y in range(start_y, end_y):
 		var y_base_idx = y * stride_y
@@ -142,45 +176,61 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray) -> voi
 			for x in range(chunk_size):
 				# Use local snapshot data
 				var index = z_base_idx + x
-				var block_id = voxel_data[index]
+				var local_index = voxel_data[index]
 				
-				if block_id == air_id:
+				if local_index == 0: # Index 0 is always Air
+					continue
+				
+				# Convert Local Index -> Global ID using the snapshot palette map
+				var state_id = 0
+				if local_index < palette_map.size():
+					state_id = palette_map[local_index]
+				
+				if state_id == 0: # Air State
 					continue
 				
 				# BlockRegistry is static, safe to read if not modifying
-				var block = BlockRegistry.get_block(block_id)
+				var state = BlockStateRegistry.get_state(state_id)
+				if not state: continue
+				
+				var block = BlockRegistry.get_block(state.block_id)
 				if not block: continue
 				
 				var pos = Vector3(x, y, z) * voxel_size
 				
 				# Inline neighbor checks for performance
+				# Note: voxel_data stores LOCAL INDICES.
+				# We assume Index 0 is Air. If a neighbor has Index 0, it's transparent.
+				# For more complex transparency (e.g. glass), we would need to lookup the neighbor's Global ID too.
+				# For Phase 1, we assume Index 0 = Transparent, others = Opaque.
+				
 				# Top (y+1)
-				if y == Constants.VOXEL_MAX_HEIGHT - 1 or (y < Constants.VOXEL_MAX_HEIGHT - 1 and voxel_data[index + stride_y] == air_id):
+				if y == Constants.VOXEL_MAX_HEIGHT - 1 or (y < Constants.VOXEL_MAX_HEIGHT - 1 and voxel_data[index + stride_y] == 0):
 					add_face(st, pos, "top", block)
 					has_faces = true
 				
 				# Bottom (y-1)
-				if y == 0 or (y > 0 and voxel_data[index - stride_y] == air_id):
+				if y == 0 or (y > 0 and voxel_data[index - stride_y] == 0):
 					add_face(st, pos, "bottom", block)
 					has_faces = true
 				
 				# Right (x+1)
-				if x == chunk_size - 1 or voxel_data[index + 1] == air_id:
+				if x == chunk_size - 1 or voxel_data[index + 1] == 0:
 					add_face(st, pos, "right", block)
 					has_faces = true
 				
 				# Left (x-1)
-				if x == 0 or voxel_data[index - 1] == air_id:
+				if x == 0 or voxel_data[index - 1] == 0:
 					add_face(st, pos, "left", block)
 					has_faces = true
 				
 				# Back (z+1)
-				if z == chunk_size - 1 or voxel_data[index + stride_z] == air_id:
+				if z == chunk_size - 1 or voxel_data[index + stride_z] == 0:
 					add_face(st, pos, "back", block)
 					has_faces = true
 				
 				# Front (z-1)
-				if z == 0 or voxel_data[index - stride_z] == air_id:
+				if z == 0 or voxel_data[index - stride_z] == 0:
 					add_face(st, pos, "front", block)
 					has_faces = true
 
@@ -219,33 +269,41 @@ func _apply_mesh_update(section_idx: int, mesh_arrays: Array) -> void:
 		mesh_inst.mesh = null
 
 # Thread-safe visibility check
-func _thread_is_face_visible(x: int, y: int, z: int, local_voxels: PackedByteArray) -> bool:
-	# If y is out of bounds (top/bottom of world), face is visible
-	if y < 0 or y >= Constants.VOXEL_MAX_HEIGHT:
-		return true
-	
-	# Check local bounds first
-	if x >= 0 and x < Constants.CHUNK_SIZE and \
-	   z >= 0 and z < Constants.CHUNK_SIZE:
-		var index = (y * Constants.CHUNK_SIZE * Constants.CHUNK_SIZE) + (z * Constants.CHUNK_SIZE) + x
-		var neighbor_id = local_voxels[index]
-		return neighbor_id == Constants.AIR_BLOCK_ID
-	
-	# Neighbor chunks logic (Cross-chunk culling)
-	# SAFETY FIX: Accessing neighbor chunks from a thread is NOT safe because PackedByteArray is not thread-safe.
-	# For now, we assume chunk boundaries are always visible (no culling between chunks).
-	# This prevents the "Out of bounds" crash and race conditions.
+func _thread_is_face_visible(_x: int, _y: int, _z: int, _local_voxels: PackedByteArray) -> bool:
+	# DEPRECATED: This function is no longer used by the optimized mesh generator.
+	# It is kept only if needed for other logic, but should be removed eventually.
 	return true
 
 func get_voxel(x: int, y: int, z: int) -> int:
 	if not is_valid_position(x, y, z):
 		return Constants.AIR_BLOCK_ID
-	return voxels[get_voxel_index(x, y, z)]
+	
+	var local_index = voxels[get_voxel_index(x, y, z)]
+	var state_id = palette.get_global_id(local_index)
+	
+	if state_id == 0:
+		return Constants.AIR_BLOCK_ID
+		
+	var state = BlockStateRegistry.get_state(state_id)
+	if state:
+		return state.block_id
+	return Constants.AIR_BLOCK_ID
+
+func get_voxel_state(x: int, y: int, z: int) -> int:
+	if not is_valid_position(x, y, z):
+		return 0 # Air State ID
+	
+	var local_index = voxels[get_voxel_index(x, y, z)]
+	return palette.get_global_id(local_index)
 
 func get_voxel_global(x: int, y: int, z: int) -> int:
 	# Check if inside this chunk
 	if is_valid_position(x, y, z):
-		return voxels[get_voxel_index(x, y, z)]
+		var local_index = voxels[get_voxel_index(x, y, z)]
+		var state_id = palette.get_global_id(local_index)
+		if state_id == 0: return Constants.AIR_BLOCK_ID
+		var state = BlockStateRegistry.get_state(state_id)
+		return state.block_id if state else Constants.AIR_BLOCK_ID
 	
 	# Check neighbors
 	if x < 0:

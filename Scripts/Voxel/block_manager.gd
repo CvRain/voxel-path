@@ -37,6 +37,11 @@ func _ready() -> void:
 		MyLogger.error("BlockRegistry not found")
 		return
 	
+	# Initialize BlockStateRegistry
+	var BlockStateRegistryScript = load("res://Scripts/Voxel/block_state_registry.gd")
+	if not BlockStateRegistryScript.get_instance():
+		add_child(BlockStateRegistryScript.new())
+	
 	load_all_blocks()
 
 func load_all_blocks() -> void:
@@ -111,7 +116,8 @@ func _load_category_blocks(category_path: String, category_config: Dictionary) -
 func _create_and_register_block(block_config: Dictionary) -> BlockData:
 	var block = BlockData.new()
 	
-	block.id = block_config.get("id", -1)
+	# ID is now assigned dynamically by BlockRegistry
+	# block.id = block_config.get("id", -1) 
 	block.name = block_config.get("name", "")
 	block.display_name = block_config.get("display_name", block.name)
 	block.category = block_config.get("category", "unknown")
@@ -133,10 +139,20 @@ func _create_and_register_block(block_config: Dictionary) -> BlockData:
 	block.mine_level = interactions.get("mine_level", 0)
 	block.mine_time = interactions.get("mine_time", 1.0)
 	
+	# Load State Definitions
+	block.state_definitions = block_config.get("states", {})
+	block.default_state = block_config.get("default_state", {})
+	
 	_load_block_textures(block, block_config)
 	
 	if block.validate():
 		BlockRegistry.register_block(block)
+		
+		# Register Block States
+		var BlockStateRegistryScript = load("res://Scripts/Voxel/block_state_registry.gd")
+		if BlockStateRegistryScript.get_instance():
+			BlockStateRegistryScript.get_instance().register_block_states(block)
+			
 		if Constants.DEBUG_BLOCK_LOADING:
 			MyLogger.debug("Registered block: %s (id: %d)" % [block.name, block.id])
 	else:

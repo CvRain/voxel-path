@@ -27,6 +27,14 @@ extends Resource
 @export var custom_properties: Dictionary = {}
 @export var variants: Dictionary = {}
 
+# Block State Definitions
+# Format: { "property_name": [value1, value2, ...] }
+# Example: { "facing": ["north", "south", "east", "west"], "lit": [true, false] }
+@export var state_definitions: Dictionary = {}
+# Default state values
+# Example: { "facing": "north", "lit": false }
+@export var default_state: Dictionary = {}
+
 func _init() -> void:
 	resource_path = ""
 
@@ -40,7 +48,7 @@ func get_variant(variant_name: String) -> BlockData:
 	return variants.get(variant_name, self)
 
 func validate() -> bool:
-	if id <= 0 or name.is_empty():
+	if name.is_empty():
 		return false
 	# textures will be empty initially, check texture_paths instead
 	if texture_paths.is_empty() and textures.is_empty():

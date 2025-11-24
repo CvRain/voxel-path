@@ -10,6 +10,7 @@
     "dirt.json",
     "grass.json",
     "cobblestone.json",
-    "bedrock.json"
+    "bedrock.json",
+    "water.json"
   ]
 }

@@ -5,7 +5,10 @@ extends Node
 static var _instance: BlockRegistry
 static var _blocks: Dictionary = {}
 static var _block_names: Dictionary = {}
-static var _next_mod_block_id: int = Constants.FIRST_MOD_BLOCK_ID
+static var _next_free_id: int = 1 # Start from 1, 0 is reserved for Air
+
+# ID Mapping Persistence
+const MAPPING_FILE_PATH: String = "user://level_block_mappings.json"
 
 func _enter_tree() -> void:
 	if _instance != null:
@@ -13,28 +16,84 @@ func _enter_tree() -> void:
 		return
 	_instance = self
 	set_process_mode(Node.PROCESS_MODE_ALWAYS)
+	
+	# Load existing mappings if available
+	_load_id_mappings()
 
 static func register_block(block: BlockData) -> bool:
-	if block.id <= 0:
-		MyLogger.error("Block ID must be > 0: %s" % block.name)
-		return false
-	
-	if block.id in _blocks:
-		MyLogger.error("Block ID already registered: %d" % block.id)
+	if block.name.is_empty():
+		MyLogger.error("Block name cannot be empty")
 		return false
 	
 	if block.name in _block_names:
 		MyLogger.error("Block name already registered: %s" % block.name)
 		return false
 	
+	# Dynamic ID Allocation with Persistence
+	if block.name == "air":
+		block.id = Constants.AIR_BLOCK_ID # 0
+	else:
+		# Check if this block name already has an assigned ID from previous sessions
+		var existing_id = _get_existing_id_for_name(block.name)
+		if existing_id != -1:
+			block.id = existing_id
+			# Ensure _next_free_id is always ahead of the max assigned ID
+			if existing_id >= _next_free_id:
+				_next_free_id = existing_id + 1
+		else:
+			# Assign next free ID
+			block.id = _next_free_id
+			_next_free_id += 1
+			# Save the new mapping immediately (or batch save later)
+			_save_id_mapping(block.name, block.id)
+	
 	_blocks[block.id] = block
 	_block_names[block.name] = block.id
 	return true
 
+# --- Persistence Logic ---
+
+static var _persistent_mappings: Dictionary = {}
+
+func _load_id_mappings() -> void:
+	if not FileAccess.file_exists(MAPPING_FILE_PATH):
+		return
+		
+	var file = FileAccess.open(MAPPING_FILE_PATH, FileAccess.READ)
+	if file:
+		var json_text = file.get_as_text()
+		var json = JSON.new()
+		var error = json.parse(json_text)
+		if error == OK:
+			var data = json.data
+			if data is Dictionary:
+				_persistent_mappings = data
+				MyLogger.info("Loaded %d block ID mappings." % _persistent_mappings.size())
+		else:
+			MyLogger.error("Failed to parse block mappings: %s" % json.get_error_message())
+
+static func _get_existing_id_for_name(block_name: String) -> int:
+	if block_name in _persistent_mappings:
+		return int(_persistent_mappings[block_name])
+	return -1
+
+static func _save_id_mapping(block_name: String, id: int) -> void:
+	_persistent_mappings[block_name] = id
+	# In a real game, you might want to save only on exit or world save.
+	# For now, we save on every new registration to be safe.
+	_save_mappings_to_disk()
+
+static func _save_mappings_to_disk() -> void:
+	var file = FileAccess.open(MAPPING_FILE_PATH, FileAccess.WRITE)
+	if file:
+		var json_string = JSON.stringify(_persistent_mappings, "\t")
+		file.store_string(json_string)
+	else:
+		MyLogger.error("Failed to save block mappings to %s" % MAPPING_FILE_PATH)
+
 static func allocate_mod_block_id() -> int:
-	var id = _next_mod_block_id
-	_next_mod_block_id += 1
-	return id
+	# Deprecated: IDs are now allocated automatically in register_block
+	return 0
 
 static func get_block(block_id: int) -> BlockData:
 	return _blocks.get(block_id)

@@ -131,15 +131,20 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray) -> voi
 	
 	# Pre-calculate bounds to avoid repeated lookups
 	var chunk_size = Constants.CHUNK_SIZE
+	var stride_y = chunk_size * chunk_size
+	var stride_z = chunk_size
+	var air_id = Constants.AIR_BLOCK_ID
 	
 	for y in range(start_y, end_y):
+		var y_base_idx = y * stride_y
 		for z in range(chunk_size):
+			var z_base_idx = y_base_idx + (z * stride_z)
 			for x in range(chunk_size):
 				# Use local snapshot data
-				var index = (y * chunk_size * chunk_size) + (z * chunk_size) + x
+				var index = z_base_idx + x
 				var block_id = voxel_data[index]
 				
-				if block_id == Constants.AIR_BLOCK_ID:
+				if block_id == air_id:
 					continue
 				
 				# BlockRegistry is static, safe to read if not modifying
@@ -148,29 +153,34 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray) -> voi
 				
 				var pos = Vector3(x, y, z) * voxel_size
 				
-				# Check neighbors for culling
-				# We pass the snapshot to the visibility check
-				if _thread_is_face_visible(x, y + 1, z, voxel_data):
+				# Inline neighbor checks for performance
+				# Top (y+1)
+				if y == Constants.VOXEL_MAX_HEIGHT - 1 or (y < Constants.VOXEL_MAX_HEIGHT - 1 and voxel_data[index + stride_y] == air_id):
 					add_face(st, pos, "top", block)
 					has_faces = true
 				
-				if _thread_is_face_visible(x, y - 1, z, voxel_data):
+				# Bottom (y-1)
+				if y == 0 or (y > 0 and voxel_data[index - stride_y] == air_id):
 					add_face(st, pos, "bottom", block)
 					has_faces = true
 				
-				if _thread_is_face_visible(x + 1, y, z, voxel_data):
+				# Right (x+1)
+				if x == chunk_size - 1 or voxel_data[index + 1] == air_id:
 					add_face(st, pos, "right", block)
 					has_faces = true
 				
-				if _thread_is_face_visible(x - 1, y, z, voxel_data):
+				# Left (x-1)
+				if x == 0 or voxel_data[index - 1] == air_id:
 					add_face(st, pos, "left", block)
 					has_faces = true
 				
-				if _thread_is_face_visible(x, y, z + 1, voxel_data):
+				# Back (z+1)
+				if z == chunk_size - 1 or voxel_data[index + stride_z] == air_id:
 					add_face(st, pos, "back", block)
 					has_faces = true
 				
-				if _thread_is_face_visible(x, y, z - 1, voxel_data):
+				# Front (z-1)
+				if z == 0 or voxel_data[index - stride_z] == air_id:
 					add_face(st, pos, "front", block)
 					has_faces = true
 

@@ -95,6 +95,8 @@ func _ready() -> void:
 		_block_selector = get_node("BlockSelector")
 	elif get_parent().has_node("BlockSelector"):
 		_block_selector = get_parent().get_node("BlockSelector")
+	elif head.has_method("set_brush_size"):
+		_block_selector = head
 	
 	if _block_selector and _block_selector.has_method("set_brush_size"):
 		_block_selector.set_brush_size(_brush_size)
@@ -441,13 +443,25 @@ func _handle_interaction() -> void:
 			
 			# 计算放置的体素列表
 			var place_voxels: Array[Vector3i] = []
-			# offset_start is already defined in the outer scope, reuse it or use a new name
-			var place_offset_start = - floori(_brush_size / 2.0)
+			
+			# 修正：根据法线方向调整放置偏移，确保方块是"贴"在表面上而不是嵌入进去
+			var axis_normal = Vector3i(round(normal.x), round(normal.y), round(normal.z))
+			var base_offset = - floori(_brush_size / 2.0)
+			var start_offset = Vector3i(base_offset, base_offset, base_offset)
+			
+			# 在法线轴上，我们需要取消居中偏移，改为向法线方向延伸
+			# 这样可以保证笔刷生成的方块整体位于点击面的外侧
+			if axis_normal.x != 0:
+				start_offset.x = 0 if axis_normal.x > 0 else - (_brush_size - 1)
+			elif axis_normal.y != 0:
+				start_offset.y = 0 if axis_normal.y > 0 else - (_brush_size - 1)
+			elif axis_normal.z != 0:
+				start_offset.z = 0 if axis_normal.z > 0 else - (_brush_size - 1)
 			
 			for x in range(_brush_size):
 				for y in range(_brush_size):
 					for z in range(_brush_size):
-						var target_pos = center_grid_pos_place + Vector3i(place_offset_start + x, place_offset_start + y, place_offset_start + z)
+						var target_pos = center_grid_pos_place + start_offset + Vector3i(x, y, z)
 						place_voxels.append(target_pos)
 			
 			# Default to Stone (1) for now
@@ -485,9 +499,9 @@ func _batch_modify_voxels(voxel_positions: Array[Vector3i], block_id: int) -> vo
 			changes[chunk_pos][section_idx + 1] = true
 			
 		# 4. Trigger Block Updates (Physics/Logic)
-		var BlockBehavior = load("res://Scripts/Voxel/block_behavior.gd")
-		if BlockBehavior and BlockBehavior.get_instance():
-			BlockBehavior.get_instance().schedule_update_and_neighbors(pos)
+		var BlockBehaviorScript = load("res://Scripts/Voxel/block_behavior.gd")
+		if BlockBehaviorScript and BlockBehaviorScript.get_instance():
+			BlockBehaviorScript.get_instance().schedule_update_and_neighbors(pos)
 
 	# 3. Batch update meshes
 	if world.has_method("update_chunks_sections"):

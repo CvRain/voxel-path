@@ -83,7 +83,12 @@ func _generate_world() -> void:
 			add_child(chunk)
 			_chunks[chunk_pos] = chunk
 			
-			_fill_chunk_data(chunk)
+			# Try to load first, if not found, generate
+			var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
+			if not ChunkSerializerScript.load_chunk(chunk, SAVE_DIR_CHUNKS):
+				_fill_chunk_data(chunk)
+			else:
+				print("Loaded chunk %d,%d from disk" % [cx, cz])
 	
 	# 2. Link Neighbors
 	for pos in _chunks:
@@ -106,10 +111,87 @@ func _generate_world() -> void:
 	
 	_is_generating = false
 
+const SAVE_DIR_BASE = "user://saves/world_test/"
+const SAVE_DIR_CHUNKS = "user://saves/world_test/chunks/"
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed:
+		if event.keycode == KEY_K:
+			save_world()
+		elif event.keycode == KEY_L:
+			load_world()
+
+func save_world() -> void:
+	print("Saving world...")
+	var start_time = Time.get_ticks_msec()
+	
+	var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
+	var PlayerSerializerScript = load("res://Scripts/Persistence/player_serializer.gd")
+	
+	# 1. Save Chunks
+	for chunk_pos in _chunks:
+		var chunk = _chunks[chunk_pos]
+		ChunkSerializerScript.save_chunk(chunk, SAVE_DIR_CHUNKS)
+	
+	# 2. Save Player
+	var player = $ProtoController
+	if player:
+		PlayerSerializerScript.save_player(player, SAVE_DIR_BASE)
+			
+	var end_time = Time.get_ticks_msec()
+	print("World saved in %d ms" % (end_time - start_time))
+	
+	# Show a toast or message (optional)
+
+func load_world() -> void:
+	if _is_generating:
+		print("World is currently processing, please wait.")
+		return
+		
+	_is_generating = true # Reuse this flag to prevent double loading
+	print("Loading world...")
+	var start_time = Time.get_ticks_msec()
+	
+	var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
+	var PlayerSerializerScript = load("res://Scripts/Persistence/player_serializer.gd")
+	var loaded_count = 0
+	
+	# 1. Load Chunks
+	var chunks_processed = 0
+	for chunk_pos in _chunks:
+		var chunk = _chunks[chunk_pos]
+		if ChunkSerializerScript.load_chunk(chunk, SAVE_DIR_CHUNKS):
+			loaded_count += 1
+			# After loading data, we must regenerate the mesh
+			chunk.generate_mesh()
+		
+		chunks_processed += 1
+		# 每处理 2 个区块，暂停一帧，让出主线程给渲染和物理引擎
+		# 同时也让后台线程池有机会消化一下刚才提交的网格生成任务
+		if chunks_processed % 2 == 0:
+			await get_tree().process_frame
+	
+	# 2. Load Player
+	var player = $ProtoController
+	if player:
+		if PlayerSerializerScript.load_player(player, SAVE_DIR_BASE):
+			print("Player state loaded.")
+	
+	var end_time = Time.get_ticks_msec()
+	print("World loaded (%d chunks) in %d ms" % [loaded_count, end_time - start_time])
+	_is_generating = false
+
 func _spawn_player() -> void:
 	var player = $ProtoController
 	if not player: return
 	
+	# Try to load player state first
+	var PlayerSerializerScript = load("res://Scripts/Persistence/player_serializer.gd")
+	if PlayerSerializerScript.load_player(player, SAVE_DIR_BASE):
+		print("Player spawned from save file.")
+		return
+	
+	# Fallback to default spawn logic
 	var center_x = (WORLD_SIZE_CHUNKS * Constants.CHUNK_SIZE) / 2
 	var center_z = (WORLD_SIZE_CHUNKS * Constants.CHUNK_SIZE) / 2
 	

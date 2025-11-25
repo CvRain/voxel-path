@@ -15,6 +15,9 @@ var _id_stone: int = 0
 var _id_dirt: int = 0
 var _id_grass: int = 0
 var _id_bedrock: int = 0
+var _id_log: int = 0
+var _id_leaves: int = 0
+var _id_water: int = 0
 
 func _ready() -> void:
 	_initialize_systems()
@@ -57,13 +60,19 @@ func _cache_block_ids() -> void:
 	var dirt = BlockRegistry.get_block_by_name("dirt")
 	var grass = BlockRegistry.get_block_by_name("grass")
 	var bedrock = BlockRegistry.get_block_by_name("bedrock")
+	var oak_log = BlockRegistry.get_block_by_name("oak_log")
+	var leaves = BlockRegistry.get_block_by_name("oak_leaves")
+	var water = BlockRegistry.get_block_by_name("water")
 	
 	if stone: _id_stone = stone.id
 	if dirt: _id_dirt = dirt.id
 	if grass: _id_grass = grass.id
 	if bedrock: _id_bedrock = bedrock.id
+	if oak_log: _id_log = oak_log.id
+	if leaves: _id_leaves = leaves.id
+	if water: _id_water = water.id
 	
-	print("Cached Block IDs: Stone=%d, Dirt=%d, Grass=%d, Bedrock=%d" % [_id_stone, _id_dirt, _id_grass, _id_bedrock])
+	print("Cached Block IDs: Stone=%d, Dirt=%d, Grass=%d, Bedrock=%d, Log=%d, Leaves=%d, Water=%d" % [_id_stone, _id_dirt, _id_grass, _id_bedrock, _id_log, _id_leaves, _id_water])
 
 func _generate_world() -> void:
 	if _is_generating: return
@@ -90,7 +99,7 @@ func _generate_world() -> void:
 			else:
 				print("Loaded chunk %d,%d from disk" % [cx, cz])
 	
-	# 2. Link Neighbors
+		# 2. Link Neighbors
 	for pos in _chunks:
 		var chunk = _chunks[pos]
 		chunk.neighbor_left = _chunks.get(pos + Vector2i(-1, 0))
@@ -98,10 +107,23 @@ func _generate_world() -> void:
 		chunk.neighbor_front = _chunks.get(pos + Vector2i(0, -1)) # -Z is Front in our logic? Wait, grid logic usually: Z-1 is "North/Front"
 		chunk.neighbor_back = _chunks.get(pos + Vector2i(0, 1))
 	
-	# 3. Generate Meshes
+	# 3. Decorate World (Trees, etc)
+	# We do this after all chunks are created so we can place blocks across chunk boundaries
+	print("Decorating world...")
+	for chunk in _chunks.values():
+		_decorate_chunk(chunk)
+	
+	# 4. Generate Meshes
 	print("Generating meshes...")
+	var chunks_processed = 0
 	for chunk in _chunks.values():
 		chunk.generate_mesh()
+		
+		chunks_processed += 1
+		# 每处理 2 个区块，暂停一帧，让出主线程给渲染和物理引擎
+		# 同时也让后台线程池有机会消化一下刚才提交的网格生成任务
+		if chunks_processed % 2 == 0:
+			await get_tree().process_frame
 		
 	var end_time = Time.get_ticks_msec()
 	print("World generation took: %d ms" % (end_time - start_time))
@@ -110,6 +132,64 @@ func _generate_world() -> void:
 	_spawn_player()
 	
 	_is_generating = false
+
+func _decorate_chunk(chunk: Chunk) -> void:
+	# Simple tree generation
+	# Iterate over the chunk surface and decide where to place trees
+	var cx_offset = chunk.chunk_position.x * Constants.CHUNK_SIZE
+	var cz_offset = chunk.chunk_position.y * Constants.CHUNK_SIZE
+	
+	# Use a deterministic random generator based on chunk position
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(chunk.chunk_position)
+	
+	for x in range(2, Constants.CHUNK_SIZE - 2, 4): # Step 4 to avoid too dense forests
+		for z in range(2, Constants.CHUNK_SIZE - 2, 4):
+			# Check noise for "Forest" biome
+			var world_x = cx_offset + x
+			var world_z = cz_offset + z
+			
+			# Use a different noise frequency for biomes
+			var biome_val = _noise.get_noise_2d(world_x * 0.5, world_z * 0.5)
+			
+			if biome_val > 0.2: # Forest biome
+				if rng.randf() < 0.3: # 30% chance in forest
+					# Find surface height
+					var surface_y = _get_surface_height(chunk, x, z)
+					if surface_y > 0:
+						_generate_tree(world_x, surface_y, world_z)
+
+func _get_surface_height(chunk: Chunk, x: int, z: int) -> int:
+	# Scan from top down
+	for y in range(Constants.VOXEL_MAX_HEIGHT - 1, 0, -1):
+		var block_id = chunk.get_voxel(x, y, z)
+		if block_id == _id_grass:
+			return y + 1
+	return -1
+
+func _generate_tree(world_x: int, y: int, world_z: int) -> void:
+	var height = 4 + randi() % 3
+	
+	# Trunk
+	for i in range(height):
+		set_voxel_at_raw(Vector3i(world_x, y + i, world_z), _id_log)
+		
+	# Leaves
+	var leaf_start_y = y + height - 2
+	var leaf_end_y = y + height + 1
+	
+	for ly in range(leaf_start_y, leaf_end_y + 1):
+		var radius = 2
+		if ly == leaf_end_y: radius = 1 # Top is narrower
+		
+		for lx in range(world_x - radius, world_x + radius + 1):
+			for lz in range(world_z - radius, world_z + radius + 1):
+				# Skip corners for rounded look
+				if abs(lx - world_x) == radius and abs(lz - world_z) == radius:
+					continue
+					
+				if get_voxel_at(Vector3i(lx, ly, lz)) == Constants.AIR_BLOCK_ID:
+					set_voxel_at_raw(Vector3i(lx, ly, lz), _id_leaves)
 
 const SAVE_DIR_BASE = "user://saves/world_test/"
 const SAVE_DIR_CHUNKS = "user://saves/world_test/chunks/"

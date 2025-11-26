@@ -16,6 +16,12 @@
     "is_emissive": false
   },
 
+  "fluid": {
+    "viscosity": 0.9,
+    "density": 1.2,
+    "infinite_threshold": 20
+  },
+
   "physics": {
     "has_collision": false,
     "friction": 0.1

@@ -84,7 +84,7 @@ func set_voxel_state(x: int, y: int, z: int, state_id: int) -> void:
 		is_modified = true
 		
 		# Update the specific section
-		update_mesh_for_voxel(y)
+		update_mesh_for_voxel(x, y, z)
 
 # Raw setter that DOES NOT trigger mesh updates.
 # Use this for world generation or batch updates.
@@ -104,7 +104,7 @@ func set_voxel_state_raw(x: int, y: int, z: int, state_id: int) -> void:
 		voxels[index] = local_index
 		is_modified = true
 
-func update_mesh_for_voxel(y: int) -> void:
+func update_mesh_for_voxel(x: int, y: int, z: int) -> void:
 	var section_idx = floori(y / float(Constants.CHUNK_SECTION_SIZE))
 	schedule_section_update(section_idx)
 	
@@ -114,6 +114,17 @@ func update_mesh_for_voxel(y: int) -> void:
 		schedule_section_update(section_idx - 1)
 	elif local_y == Constants.CHUNK_SECTION_SIZE - 1 and section_idx < sections.size() - 1:
 		schedule_section_update(section_idx + 1)
+	
+	# Check Chunk Neighbors
+	if x == 0 and neighbor_left:
+		neighbor_left.schedule_section_update(section_idx)
+	elif x == Constants.CHUNK_SIZE - 1 and neighbor_right:
+		neighbor_right.schedule_section_update(section_idx)
+		
+	if z == 0 and neighbor_front:
+		neighbor_front.schedule_section_update(section_idx)
+	elif z == Constants.CHUNK_SIZE - 1 and neighbor_back:
+		neighbor_back.schedule_section_update(section_idx)
 
 func schedule_section_update(section_idx: int) -> void:
 	# For single updates, we still need a snapshot to be thread-safe
@@ -123,8 +134,21 @@ func schedule_section_update(section_idx: int) -> void:
 	_schedule_section_update_internal(section_idx, voxel_snapshot, palette_map)
 
 func _schedule_section_update_internal(section_idx: int, voxel_snapshot: PackedByteArray, palette_map: Array) -> void:
+	# Capture neighbor snapshots for thread safety
+	# We pass the raw voxels (COW) and a duplicate of the palette map
+	var neighbors_data = {}
+	
+	if neighbor_left:
+		neighbors_data["left"] = [neighbor_left.voxels, neighbor_left.palette._id_map.duplicate()]
+	if neighbor_right:
+		neighbors_data["right"] = [neighbor_right.voxels, neighbor_right.palette._id_map.duplicate()]
+	if neighbor_front:
+		neighbors_data["front"] = [neighbor_front.voxels, neighbor_front.palette._id_map.duplicate()]
+	if neighbor_back:
+		neighbors_data["back"] = [neighbor_back.voxels, neighbor_back.palette._id_map.duplicate()]
+
 	WorkerThreadPool.add_task(
-		_thread_generate_mesh.bind(section_idx, voxel_snapshot, palette_map),
+		_thread_generate_mesh.bind(section_idx, voxel_snapshot, palette_map, neighbors_data),
 		true,
 		"Mesh Gen Section %d" % section_idx
 	)
@@ -153,7 +177,7 @@ func generate_mesh() -> void:
 
 # --- Threaded Function ---
 # This runs on a background thread. CANNOT touch SceneTree nodes.
-func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palette_map: Array) -> void:
+func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palette_map: Array, neighbors_data: Dictionary) -> void:
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	
@@ -167,7 +191,6 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 	var chunk_size = Constants.CHUNK_SIZE
 	var stride_y = chunk_size * chunk_size
 	var stride_z = chunk_size
-	var air_id = Constants.AIR_BLOCK_ID # This is Global ID 0. In Palette, Index 0 is always Global ID 0.
 	
 	for y in range(start_y, end_y):
 		var y_base_idx = y * stride_y
@@ -198,11 +221,7 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 				
 				var pos = Vector3(x, y, z) * voxel_size
 				
-				# Inline neighbor checks for performance
-				# Note: voxel_data stores LOCAL INDICES.
-				# We assume Index 0 is Air. If a neighbor has Index 0, it's transparent.
-				# For more complex transparency (e.g. glass), we would need to lookup the neighbor's Global ID too.
-				# For Phase 1, we assume Index 0 = Transparent, others = Opaque.
+				# --- Face Culling Logic ---
 				
 				# Top (y+1)
 				if y == Constants.VOXEL_MAX_HEIGHT - 1 or (y < Constants.VOXEL_MAX_HEIGHT - 1 and voxel_data[index + stride_y] == 0):
@@ -215,22 +234,102 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 					has_faces = true
 				
 				# Right (x+1)
-				if x == chunk_size - 1 or voxel_data[index + 1] == 0:
+				var draw_right = false
+				if x < chunk_size - 1:
+					if voxel_data[index + 1] == 0: draw_right = true
+				else:
+					# Check neighbor right
+					if not neighbors_data.has("right"):
+						draw_right = true
+					else:
+						var n_data = neighbors_data["right"]
+						var n_voxels = n_data[0]
+						var n_pal = n_data[1]
+						# Neighbor x=0, same y, z
+						var n_idx = (y * stride_y) + (z * stride_z) + 0
+						var n_local = n_voxels[n_idx]
+						if n_local == 0:
+							draw_right = true
+						else:
+							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
+							if n_global == 0: draw_right = true
+				
+				if draw_right:
 					add_face(st, pos, "right", block)
 					has_faces = true
 				
 				# Left (x-1)
-				if x == 0 or voxel_data[index - 1] == 0:
+				var draw_left = false
+				if x > 0:
+					if voxel_data[index - 1] == 0: draw_left = true
+				else:
+					# Check neighbor left
+					if not neighbors_data.has("left"):
+						draw_left = true
+					else:
+						var n_data = neighbors_data["left"]
+						var n_voxels = n_data[0]
+						var n_pal = n_data[1]
+						# Neighbor x=chunk_size-1, same y, z
+						var n_idx = (y * stride_y) + (z * stride_z) + (chunk_size - 1)
+						var n_local = n_voxels[n_idx]
+						if n_local == 0:
+							draw_left = true
+						else:
+							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
+							if n_global == 0: draw_left = true
+				
+				if draw_left:
 					add_face(st, pos, "left", block)
 					has_faces = true
 				
 				# Back (z+1)
-				if z == chunk_size - 1 or voxel_data[index + stride_z] == 0:
+				var draw_back = false
+				if z < chunk_size - 1:
+					if voxel_data[index + stride_z] == 0: draw_back = true
+				else:
+					# Check neighbor back
+					if not neighbors_data.has("back"):
+						draw_back = true
+					else:
+						var n_data = neighbors_data["back"]
+						var n_voxels = n_data[0]
+						var n_pal = n_data[1]
+						# Neighbor z=0, same y, x
+						var n_idx = (y * stride_y) + (0 * stride_z) + x
+						var n_local = n_voxels[n_idx]
+						if n_local == 0:
+							draw_back = true
+						else:
+							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
+							if n_global == 0: draw_back = true
+				
+				if draw_back:
 					add_face(st, pos, "back", block)
 					has_faces = true
 				
 				# Front (z-1)
-				if z == 0 or voxel_data[index - stride_z] == 0:
+				var draw_front = false
+				if z > 0:
+					if voxel_data[index - stride_z] == 0: draw_front = true
+				else:
+					# Check neighbor front
+					if not neighbors_data.has("front"):
+						draw_front = true
+					else:
+						var n_data = neighbors_data["front"]
+						var n_voxels = n_data[0]
+						var n_pal = n_data[1]
+						# Neighbor z=chunk_size-1, same y, x
+						var n_idx = (y * stride_y) + ((chunk_size - 1) * stride_z) + x
+						var n_local = n_voxels[n_idx]
+						if n_local == 0:
+							draw_front = true
+						else:
+							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
+							if n_global == 0: draw_front = true
+				
+				if draw_front:
 					add_face(st, pos, "front", block)
 					has_faces = true
 

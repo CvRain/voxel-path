@@ -6,7 +6,7 @@
 extends CharacterBody3D
 
 # --- Enums ---
-enum MoveState {GROUND, FLYING, NOCLIP}
+enum MoveState {GROUND, FLYING, NOCLIP, SWIMMING}
 
 # --- Exports ---
 @export_group("Movement")
@@ -16,6 +16,7 @@ enum MoveState {GROUND, FLYING, NOCLIP}
 @export var can_sprint: bool = true
 @export var can_fly: bool = true
 @export var can_noclip: bool = true
+@export var can_swim: bool = true
 @export var step_height: float = 1.1 # Max height to step up (0.25 is block size)
 @export var step_smooth_time: float = 0.15 # 阶梯上升的平滑时间
 
@@ -25,6 +26,11 @@ enum MoveState {GROUND, FLYING, NOCLIP}
 @export var sprint_speed: float = 9.0
 @export var jump_velocity: float = 4.8
 @export var fly_speed: float = 12.0
+@export var swim_speed: float = 4.0
+
+@export_group("Fluid Physics")
+@export var fluid_drag: float = 0.98 # Per frame velocity multiplier
+@export var fluid_buoyancy: float = 1.2 # Multiplier against gravity
 
 @export_group("Tuning")
 @export var acceleration: float = 12.0
@@ -145,6 +151,9 @@ func _physics_process(delta: float) -> void:
 		_update_step_smoothing(delta)
 		return # 在阶梯上升期间，跳过普通物理计算
 
+	# Check for fluids
+	_check_fluid_state()
+
 	# --- State Logic ---
 	match _current_state:
 		MoveState.GROUND:
@@ -153,6 +162,8 @@ func _physics_process(delta: float) -> void:
 			_flying_physics(delta)
 		MoveState.NOCLIP:
 			_flying_physics(delta)
+		MoveState.SWIMMING:
+			_swimming_physics(delta)
 
 # --- State Implementations ---
 func _ground_physics(delta: float):
@@ -212,6 +223,42 @@ func _flying_physics(delta: float):
 	velocity = vel
 	move_and_slide()
 
+func _swimming_physics(delta: float):
+	var vel := velocity
+	
+	# Apply buoyancy (upward force)
+	# Gravity is negative. Buoyancy opposes gravity.
+	# If fluid_buoyancy is 1.0, it counteracts gravity exactly (neutral buoyancy).
+	# If > 1.0, it floats up.
+	var gravity_force = Vector3(0, -_gravity, 0)
+	var buoyancy = Vector3(0, _gravity * fluid_buoyancy, 0)
+	
+	vel += (gravity_force + buoyancy) * delta
+	
+	# Apply Drag (Viscosity)
+	# Use a time-corrected damping
+	var damping = pow(fluid_drag, delta * 60.0)
+	vel *= damping
+	
+	# Movement
+	var input_dir_2d := Input.get_vector(input_left, input_right, input_forward, input_back)
+	var move_dir := (head.global_basis * Vector3(input_dir_2d.x, 0, input_dir_2d.y)).normalized()
+	
+	# Vertical movement
+	if Input.is_action_pressed(input_jump):
+		move_dir.y += 1.0
+	if Input.is_action_pressed(input_fly_down):
+		move_dir.y -= 1.0
+		
+	if move_dir.length() > 0:
+		move_dir = move_dir.normalized()
+		# Accelerate towards target speed
+		var target_vel = move_dir * swim_speed
+		vel = vel.move_toward(target_vel, acceleration * delta)
+		
+	velocity = vel
+	move_and_slide()
+
 # --- Helper Functions ---
 func _set_state(new_state: MoveState):
 	if _current_state == new_state:
@@ -230,6 +277,9 @@ func _set_state(new_state: MoveState):
 		MoveState.NOCLIP:
 			collider.disabled = true
 			has_gravity = false
+		MoveState.SWIMMING:
+			collider.disabled = false
+			has_gravity = false # We handle buoyancy manually
 
 func _handle_mouse_look(relative_motion: Vector2):
 	_look_rotation.y -= relative_motion.x * look_speed
@@ -536,3 +586,32 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif can_move and can_jump and not is_on_floor():
 			# Double jump / Fly toggle logic could go here
 			pass
+
+func _check_fluid_state() -> void:
+	if not can_swim: return
+	if _current_state == MoveState.NOCLIP: return
+	
+	# Get block at eye level
+	var eye_pos = global_position + Vector3(0, 0.5, 0) # Slightly below eyes to ensure head is in water
+	var world = get_parent()
+	
+	if not world.has_method("get_voxel_at"):
+		return
+		
+	# Convert to voxel coords (assuming 0.25 scale)
+	var voxel_pos = Vector3i(floor(eye_pos.x / 0.25), floor(eye_pos.y / 0.25), floor(eye_pos.z / 0.25))
+	
+	var block_id = world.get_voxel_at(voxel_pos)
+	var block_data = BlockRegistry.get_block(block_id)
+	
+	var FluidBlockDataScript = load("res://Scripts/Voxel/fluid_block_data.gd")
+	if block_data and is_instance_of(block_data, FluidBlockDataScript):
+		if _current_state != MoveState.SWIMMING:
+			_set_state(MoveState.SWIMMING)
+	else:
+		if _current_state == MoveState.SWIMMING:
+			# Exit fluid
+			_set_state(MoveState.GROUND)
+			# Add a little jump out boost if holding jump
+			if Input.is_action_pressed(input_jump):
+				velocity.y = jump_velocity * 0.8

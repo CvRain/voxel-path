@@ -114,7 +114,18 @@ func _load_category_blocks(category_path: String, category_config: Dictionary) -
 		_create_and_register_block(block_config)
 
 func _create_and_register_block(block_config: Dictionary) -> BlockData:
-	var block = BlockData.new()
+	var block: BlockData
+	
+	if block_config.has("fluid"):
+		var FluidBlockDataScript = load("res://Scripts/Voxel/fluid_block_data.gd")
+		block = FluidBlockDataScript.new()
+		var fluid_props = block_config.get("fluid", {})
+		block.viscosity = fluid_props.get("viscosity", 0.8)
+		block.density = fluid_props.get("density", 1.0)
+		block.flow_speed = fluid_props.get("flow_speed", 5)
+		block.infinite_threshold = fluid_props.get("infinite_threshold", 100)
+	else:
+		block = BlockData.new()
 	
 	# ID is now assigned dynamically by BlockRegistry
 	# block.id = block_config.get("id", -1) 

@@ -1,8 +1,11 @@
 extends Node3D
 
 var _world_generator: Node
+var _fluid_manager: Node
 var _chunks: Dictionary = {} # Vector2i -> Chunk
 var _is_generating: bool = false
+var _is_raining: bool = true # Default to raining for testing
+var _rain_timer: float = 0.0
 
 # World Generation Settings
 const WORLD_SIZE_CHUNKS: int = 4 # 4x4 chunks
@@ -38,7 +41,31 @@ func _on_loading_complete() -> void:
 		add_child(_world_generator)
 		_world_generator.cache_block_ids()
 		
+		# Initialize Fluid Manager
+		var FluidManagerScript = load("res://Scripts/Voxel/fluid_manager.gd")
+		_fluid_manager = FluidManagerScript.new(self)
+		add_child(_fluid_manager)
+		
 		_generate_world()
+
+func _process(delta: float) -> void:
+	if _is_raining and _fluid_manager:
+		_rain_timer += delta
+		if _rain_timer > 0.05: # 20 ticks per second
+			_rain_timer = 0.0
+			_process_rain()
+
+func _process_rain() -> void:
+	var keys = _chunks.keys()
+	if keys.is_empty(): return
+	
+	# Process a few random chunks
+	for i in range(3):
+		var key = keys[randi() % keys.size()]
+		var chunk = _chunks[key]
+		var water = BlockRegistry.get_block_by_name("water")
+		if water:
+			_fluid_manager.process_rain_tick(chunk, water.id)
 
 func _generate_world() -> void:
 		if _is_generating: return

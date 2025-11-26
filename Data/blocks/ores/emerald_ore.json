@@ -1,0 +1,15 @@
+{
+  "name": "emerald_ore",
+  "display_name": "Emerald Ore",
+  "category": "ores",
+  "description": "Green gemstone, often used for trading.",
+  "textures": {
+    "all": "res://Assets/Textures/Ore/emerald_ore.png"
+  },
+  "properties": {
+    "hardness": 3.5,
+    "resistance": 3.5,
+    "is_solid": true,
+    "is_transparent": false
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "bedrock",
+  "display_name": "Bedrock",
+  "category": "nature",
+  "description": "The deepest layer of the world. Unbreakable in survival mode.",
+
+  "textures": {
+    "all": "res://Assets/Textures/Natural/bedrock.png"
+  },
+
+  "properties": {
+    "hardness": 9999.0,
+    "resistance": 9999.0,
+    "is_solid": true,
+    "is_transparent": false
+  },
+
+  "physics": {
+    "has_collision": true,
+    "friction": 1.0,
+    "bounce": 0.0
+  },
+
+  "interactions": {
+    "can_place": false,
+    "can_break": false,
+    "tool_required": "none",
+    "mine_level": 99
+  }
+}

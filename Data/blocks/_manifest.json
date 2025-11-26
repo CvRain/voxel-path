@@ -2,38 +2,45 @@
   "format_version": "1.0",
   "description": "Block registry manifest - Central configuration for all block categories",
   "last_updated": "2025-11-21",
-  
+
   "categories": [
 	{
-	  "path": "res://Data/blocks/core",
+	  "path": "res://Data/blocks/nature",
 	  "config": "config.json",
 	  "enabled": true,
 	  "priority": 10,
-	  "description": "Core building blocks: stone, dirt, grass, etc."
+	  "description": "Natural blocks: soils, rocks, flora, fluids."
 	},
 	{
-	  "path": "res://Data/blocks/wood",
+	  "path": "res://Data/blocks/ores",
 	  "config": "config.json",
 	  "enabled": true,
 	  "priority": 20,
-	  "description": "Wood and wooden blocks: oak, birch, spruce, etc."
+	  "description": "Raw mineral resources."
 	},
 	{
-	  "path": "res://Data/blocks/decorative",
+	  "path": "res://Data/blocks/metals",
 	  "config": "config.json",
 	  "enabled": true,
 	  "priority": 30,
-	  "description": "Decorative blocks: glass, sand, gravel, etc."
+	  "description": "Processed metal blocks."
+	},
+	{
+	  "path": "res://Data/blocks/processed",
+	  "config": "config.json",
+	  "enabled": true,
+	  "priority": 40,
+	  "description": "Crafted building materials."
 	},
 	{
 	  "path": "res://Data/blocks/machines",
 	  "config": "config.json",
-	  "enabled": false,
-	  "priority": 40,
-	  "description": "Mechanical blocks - Future expansion"
+	  "enabled": true,
+	  "priority": 50,
+	  "description": "Functional blocks and machinery."
 	}
   ],
-  
+
   "modded_categories": [
 	{
 	  "path": "user://mods",
@@ -43,7 +50,7 @@
 	  "description": "User-installed mods"
 	}
   ],
-  
+
   "settings": {
 	"auto_reload": false,
 	"validate_on_load": true,

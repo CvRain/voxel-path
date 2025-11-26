@@ -1,0 +1,15 @@
+{
+  "name": "aluminum_ore",
+  "display_name": "Aluminum Ore",
+  "category": "ores",
+  "description": "Lightweight metal ore. Used for advanced engineering.",
+  "textures": {
+    "all": "res://Assets/Textures/Ore/aluminum_ore.png"
+  },
+  "properties": {
+    "hardness": 3.0,
+    "resistance": 3.0,
+    "is_solid": true,
+    "is_transparent": false
+  }
+}

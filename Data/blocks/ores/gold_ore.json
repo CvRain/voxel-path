@@ -1,0 +1,15 @@
+{
+  "name": "gold_ore",
+  "display_name": "Gold Ore",
+  "category": "ores",
+  "description": "Precious metal, highly conductive.",
+  "textures": {
+    "all": "res://Assets/Textures/Ore/gold_ore.png"
+  },
+  "properties": {
+    "hardness": 3.0,
+    "resistance": 3.0,
+    "is_solid": true,
+    "is_transparent": false
+  }
+}

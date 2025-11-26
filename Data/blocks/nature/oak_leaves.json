@@ -1,0 +1,14 @@
+{
+  "name": "oak_leaves",
+  "display_name": "Oak Leaves",
+  "category": "nature",
+  "textures": {
+    "all": "res://Assets/Textures/Natural/leaves_oak_opaque.png"
+  },
+  "states": {
+    "decayable": [true, false]
+  },
+  "default_state": {
+    "decayable": true
+  }
+}

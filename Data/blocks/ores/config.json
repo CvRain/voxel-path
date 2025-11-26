@@ -1,0 +1,20 @@
+{
+  "category": "ores",
+  "display_name": "Ores",
+  "priority": 20,
+  "description": "Raw mineral resources found underground.",
+  "version": "1.0",
+  "blocks": [
+    "coal_ore.json",
+    "iron_ore.json",
+    "copper_ore.json",
+    "gold_ore.json",
+    "tin_ore.json",
+    "aluminum_ore.json",
+    "silver_ore.json",
+    "zinc_ore.json",
+    "diamond_ore.json",
+    "emerald_ore.json",
+    "lapis_ore.json"
+  ]
+}

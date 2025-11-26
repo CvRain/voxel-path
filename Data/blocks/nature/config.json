@@ -1,0 +1,17 @@
+{
+  "category": "nature",
+  "display_name": "Nature",
+  "priority": 10,
+  "description": "Natural blocks found in the world: soils, rocks, flora, fluids.",
+  "version": "1.0",
+  "blocks": [
+    "stone.json",
+    "dirt.json",
+    "grass.json",
+    "bedrock.json",
+    "water.json",
+    "cobblestone.json",
+    "oak_log.json",
+    "oak_leaves.json"
+  ]
+}

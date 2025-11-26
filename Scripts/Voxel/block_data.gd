@@ -35,13 +35,34 @@ extends Resource
 # Example: { "facing": "north", "lit": false }
 @export var default_state: Dictionary = {}
 
+# Texture Variation
+@export var random_texture_frames: int = 1
+
 func _init() -> void:
 	resource_path = ""
 
-func get_texture_uv(face: String, texture_type: String = "diffuse") -> TextureUV:
+func get_texture_uv(face: String, texture_type: String = "diffuse", frame: int = 0) -> TextureUV:
 	var key = "%s_%s" % [face, texture_type]
+	if frame > 0:
+		key = "%s#%d" % [key, frame]
+		
 	if key in textures:
 		return textures[key]
+		
+	# Fallback to default frame if specific frame not found
+	if frame > 0:
+		key = "%s_%s" % [face, texture_type]
+		if key in textures:
+			return textures[key]
+			
+	# Fallback to generic type (e.g. "diffuse")
+	key = texture_type
+	if frame > 0:
+		key = "%s#%d" % [key, frame]
+	
+	if key in textures:
+		return textures[key]
+		
 	return textures.get(texture_type, null)
 
 func get_variant(variant_name: String) -> BlockData:

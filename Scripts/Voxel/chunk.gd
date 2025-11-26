@@ -353,14 +353,21 @@ func is_face_visible(x: int, y: int, z: int) -> bool:
 func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> void:
 	var s = Constants.VOXEL_SIZE
 	var uv_rect = Rect2(0, 0, 1, 1)
-	var texture_uv = block.get_texture_uv(face)
+	
+	# Determine texture frame
+	var frame_index = 0
+	if block.random_texture_frames > 1:
+		# Deterministic random based on position
+		# We use a simple hash of the coordinates
+		var pos_hash = int(pos.x / s) * 31 + int(pos.y / s) * 37 + int(pos.z / s) * 41
+		frame_index = abs(pos_hash) % block.random_texture_frames
+	
+	var texture_uv = block.get_texture_uv(face, "diffuse", frame_index)
 	if texture_uv:
 		uv_rect = texture_uv.uv_rect
 		
-		# Temporary: Crop to top-left 2x2 pixels of the 16x16 texture
-		# This reduces high-frequency noise on small blocks (0.25m).
-		# TODO: Make this configurable per block/texture in the future.
-		var crop_ratio = 8.0 / 16.0
+		# 使用16x16的素材，裁剪成16x16的素材
+		var crop_ratio = 16.0 / 16.0
 		uv_rect.size *= crop_ratio
 	
 	# Determine color (Biome tinting)
@@ -370,6 +377,10 @@ func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> 
 		if face != "bottom":
 			# Basic green tint for grass
 			color = Color(0.4, 0.85, 0.4)
+
+	if block.name == "oak_leaves":
+		# Light green tint for leaves
+		color = Color(0.5, 0.8, 0.5)
 	
 	var uv_bl = Vector2(uv_rect.position.x, uv_rect.position.y + uv_rect.size.y)
 	var uv_br = Vector2(uv_rect.position.x + uv_rect.size.x, uv_rect.position.y + uv_rect.size.y)

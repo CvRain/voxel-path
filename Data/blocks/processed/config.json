@@ -1,0 +1,8 @@
+{
+  "category": "processed",
+  "display_name": "Processed",
+  "priority": 40,
+  "description": "Crafted building materials.",
+  "version": "1.0",
+  "blocks": []
+}

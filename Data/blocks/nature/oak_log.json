@@ -1,0 +1,16 @@
+{
+  "name": "oak_log",
+  "display_name": "Oak Log",
+  "category": "nature",
+  "textures": {
+    "top": "res://Assets/Textures/Natural/oak_log_top.png",
+    "bottom": "res://Assets/Textures/Natural/oak_log_top.png",
+    "side": "res://Assets/Textures/Natural/oak_log.png"
+  },
+  "states": {
+    "axis": ["y", "x", "z"]
+  },
+  "default_state": {
+    "axis": "y"
+  }
+}

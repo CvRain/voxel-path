@@ -1,0 +1,8 @@
+{
+  "category": "metals",
+  "display_name": "Metals",
+  "priority": 30,
+  "description": "Processed metal blocks.",
+  "version": "1.0",
+  "blocks": []
+}

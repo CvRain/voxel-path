@@ -1,0 +1,31 @@
+{
+  "name": "cobblestone",
+  "display_name": "Cobblestone",
+  "category": "nature",
+  "description": "A decorative stone block with a rough texture",
+
+  "textures": {
+    "all": "res://Assets/Textures/Natural/cobblestone.png"
+  },
+
+  "properties": {
+    "hardness": 1.5,
+    "resistance": 2.0,
+    "is_solid": true,
+    "is_transparent": false
+  },
+
+  "physics": {
+    "has_collision": true,
+    "friction": 0.8,
+    "bounce": 0.1
+  },
+
+  "interactions": {
+    "can_place": true,
+    "can_break": true,
+    "tool_required": "pickaxe",
+    "mine_level": 1,
+    "mine_time": 1.5
+  }
+}

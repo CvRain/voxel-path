@@ -1,0 +1,15 @@
+{
+  "name": "lapis_ore",
+  "display_name": "Lapis Lazuli Ore",
+  "category": "ores",
+  "description": "Blue mineral used for dyes and enchanting.",
+  "textures": {
+    "all": "res://Assets/Textures/Ore/lapis_ore.png"
+  },
+  "properties": {
+    "hardness": 3.0,
+    "resistance": 3.0,
+    "is_solid": true,
+    "is_transparent": false
+  }
+}

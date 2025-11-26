@@ -1,0 +1,15 @@
+{
+  "name": "iron_ore",
+  "display_name": "Iron Ore",
+  "category": "ores",
+  "description": "Common metal ore, used for tools and machinery.",
+  "textures": {
+    "all": "res://Assets/Textures/Ore/iron_ore.png"
+  },
+  "properties": {
+    "hardness": 3.0,
+    "resistance": 3.0,
+    "is_solid": true,
+    "is_transparent": false
+  }
+}

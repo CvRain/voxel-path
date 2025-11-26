@@ -185,9 +185,15 @@ func _resolve_all_block_uvs() -> void:
 		# Handle "all"
 		if "all" in block.texture_paths:
 			var path = block.texture_paths["all"]
-			var uv = _texture_manager.get_texture_uv(path)
-			if uv:
-				block.textures["diffuse"] = uv
+			var frames = _texture_manager.get_frame_count(path)
+			block.random_texture_frames = max(block.random_texture_frames, frames)
+			
+			for i in range(frames):
+				var uv = _texture_manager.get_texture_uv(path, i)
+				if uv:
+					var key = "diffuse"
+					if i > 0: key += "#%d" % i
+					block.textures[key] = uv
 		
 		# Handle specific faces
 		for face in ["top", "bottom", "left", "right", "front", "back"]:
@@ -198,9 +204,17 @@ func _resolve_all_block_uvs() -> void:
 				path = block.texture_paths["side"]
 			
 			if path:
-				var uv = _texture_manager.get_texture_uv(path)
-				if uv:
-					block.textures["%s_diffuse" % face] = uv
+				var frames = _texture_manager.get_frame_count(path)
+				# Note: If different faces have different frame counts, this might be tricky.
+				# We assume if one face is animated/random, all are, or we take the max.
+				block.random_texture_frames = max(block.random_texture_frames, frames)
+				
+				for i in range(frames):
+					var uv = _texture_manager.get_texture_uv(path, i)
+					if uv:
+						var key = "%s_diffuse" % face
+						if i > 0: key += "#%d" % i
+						block.textures[key] = uv
 
 static func get_loaded_categories() -> Dictionary:
 	return _instance._loaded_categories.duplicate() if _instance else {}

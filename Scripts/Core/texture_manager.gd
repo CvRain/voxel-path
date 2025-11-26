@@ -6,6 +6,7 @@ static var _instance: TextureManager
 var _atlas_texture: ImageTexture
 var _uv_cache: Dictionary = {} # path -> TextureUV
 var _pending_textures: Dictionary = {} # path -> Image
+var _texture_frame_counts: Dictionary = {} # path -> int (number of frames for strips)
 
 func _enter_tree() -> void:
 	if _instance != null:
@@ -15,18 +16,43 @@ func _enter_tree() -> void:
 	set_process_mode(Node.PROCESS_MODE_ALWAYS)
 
 func register_texture(path: String) -> void:
-	if path in _pending_textures:
+	if path in _pending_textures or path in _texture_frame_counts:
 		return
 		
 	if not FileAccess.file_exists(path):
 		MyLogger.error("Texture file not found: %s" % path)
 		return
 		
-	var image = Image.load_from_file(path)
-	if image:
-		_pending_textures[path] = image
+	# Use ResourceLoader to load the image properly in both editor and export
+	var texture = load(path)
+	if texture is Texture2D:
+		var image = texture.get_image()
+		if image:
+			# Ensure format is RGBA8 for atlas consistency
+			if image.get_format() != Image.FORMAT_RGBA8:
+				image.convert(Image.FORMAT_RGBA8)
+				
+			var w = image.get_width()
+			var h = image.get_height()
+			
+			# Check for vertical strip (16x112, 16x32, etc)
+			# We assume tiles are square based on width
+			if h > w and h % w == 0:
+				var frames = int(h / w)
+				_texture_frame_counts[path] = frames
+				MyLogger.debug("Detected texture strip: %s (%d frames)" % [path, frames])
+				
+				for i in range(frames):
+					var frame_img = image.get_region(Rect2i(0, i * w, w, w))
+					var frame_key = "%s#%d" % [path, i]
+					_pending_textures[frame_key] = frame_img
+			else:
+				_pending_textures[path] = image
+				_texture_frame_counts[path] = 1
+		else:
+			MyLogger.error("Failed to get image data from texture: %s" % path)
 	else:
-		MyLogger.error("Failed to load image: %s" % path)
+		MyLogger.error("Failed to load texture resource: %s" % path)
 
 func build_atlas() -> void:
 	if _pending_textures.is_empty():
@@ -78,8 +104,21 @@ func build_atlas() -> void:
 	_atlas_texture = ImageTexture.create_from_image(atlas_image)
 	MyLogger.success("Atlas generated: %dx%d" % [atlas_width, atlas_height])
 
-func get_texture_uv(path: String) -> TextureUV:
-	return _uv_cache.get(path)
+func get_texture_uv(path: String, frame: int = 0) -> TextureUV:
+	if frame > 0:
+		var frame_key = "%s#%d" % [path, frame]
+		return _uv_cache.get(frame_key)
+	
+	# Try direct path first (for non-strips)
+	if path in _uv_cache:
+		return _uv_cache[path]
+		
+	# If path was a strip, default to frame 0
+	var frame0_key = "%s#0" % path
+	return _uv_cache.get(frame0_key)
+
+func get_frame_count(path: String) -> int:
+	return _texture_frame_counts.get(path, 1)
 
 static func get_instance() -> TextureManager:
 	return _instance

@@ -1,6 +1,9 @@
 class_name WorldGenerator
 extends Node
 
+# 引入区块生成阶段枚举
+const ChunkGenerationStage = preload("res://Scripts/Voxel/chunk_generation_stage.gd").ChunkGenerationStage
+
 var _seed: int
 var _continental_noise: FastNoiseLite
 var _erosion_noise: FastNoiseLite
@@ -10,6 +13,9 @@ var _biomes: Array = []
 
 # Cached Block IDs
 var _id_bedrock: int = 0
+var _id_stone: int = 0
+var _id_dirt: int = 0
+var _id_grass: int = 0
 var _id_water: int = 0
 var _id_log: int = 0
 var _id_leaves: int = 0
@@ -147,11 +153,17 @@ func _get_biome(height: int, temp: float, humidity: float) -> Resource:
 
 func cache_block_ids() -> void:
 	var bedrock = BlockRegistry.get_block_by_name("bedrock")
+	var stone = BlockRegistry.get_block_by_name("stone")
+	var dirt = BlockRegistry.get_block_by_name("dirt")
+	var grass = BlockRegistry.get_block_by_name("grass")
 	var water = BlockRegistry.get_block_by_name("water")
 	var oak_log = BlockRegistry.get_block_by_name("oak_log")
 	var leaves = BlockRegistry.get_block_by_name("oak_leaves")
 	
 	if bedrock: _id_bedrock = bedrock.id
+	if stone: _id_stone = stone.id
+	if dirt: _id_dirt = dirt.id
+	if grass: _id_grass = grass.id
 	if water: _id_water = water.id
 	if oak_log: _id_log = oak_log.id
 	if leaves: _id_leaves = leaves.id
@@ -167,6 +179,166 @@ func cache_block_ids() -> void:
 		if block:
 			_ore_ids[ore_name] = block.id
 
+# 分阶段生成区块地形
+func generate_chunk_stage(chunk: Chunk, stage: int) -> void:
+	match stage:
+		ChunkGenerationStage.BASE_TERRAIN:
+			_generate_base_terrain(chunk)
+		ChunkGenerationStage.WATER_AND_SURFACE:
+			_generate_water_and_surface(chunk)
+		ChunkGenerationStage.ORES_AND_CAVES:
+			_generate_ores_and_caves(chunk)
+		ChunkGenerationStage.DECORATIONS:
+			_generate_decorations(chunk)
+
+# 第一阶段：生成基础地形（基岩和石头）
+func _generate_base_terrain(chunk: Chunk) -> void:
+	var cx_offset = chunk.chunk_position.x * Constants.CHUNK_SIZE
+	var cz_offset = chunk.chunk_position.y * Constants.CHUNK_SIZE
+	
+	var step = 2 # Voxel scale optimization
+	
+	for x in range(0, Constants.CHUNK_SIZE, step):
+		for z in range(0, Constants.CHUNK_SIZE, step):
+			var world_x = cx_offset + x
+			var world_z = cz_offset + z
+			
+			# 1. Calculate Height (Continental + Erosion)
+			var continental_val = _continental_noise.get_noise_2d(world_x, world_z)
+			var erosion_val = _erosion_noise.get_noise_2d(world_x, world_z)
+			
+			# Map continental noise to base height zones
+			var base_height = 64.0
+			var height_scale = 0.0
+			
+			if continental_val < -0.2: # Ocean
+				base_height = 40.0
+				height_scale = 20.0
+			elif continental_val < 0.0: # Coast/Beach
+				base_height = 64.0
+				height_scale = 5.0
+			elif continental_val < 0.5: # Inland/Plains
+				base_height = 70.0
+				height_scale = 30.0
+			else: # Mountains
+				base_height = 100.0
+				height_scale = 120.0
+				
+			# Apply erosion/detail
+			var final_height = int(base_height + (continental_val * 10.0) + (erosion_val * height_scale))
+			final_height = clamp(final_height, 0, Constants.VOXEL_MAX_HEIGHT - 1)
+			
+			# Quantize height for optimization
+			var height = int(round(final_height / float(step)) * step)
+			
+			# Fill column with base terrain (only bedrock and stone)
+			for i in range(step):
+				for k in range(step):
+					var vx = x + i
+					var vz = z + k
+					
+					if vx >= Constants.CHUNK_SIZE or vz >= Constants.CHUNK_SIZE:
+						continue
+						
+					_fill_base_column(chunk, vx, vz, height)
+
+# 填充基础列（基岩和石头）
+func _fill_base_column(chunk: Chunk, x: int, z: int, height: int) -> void:
+	for y in range(height + 1):
+		var block_id = Constants.AIR_BLOCK_ID
+		
+		if y == 0:
+			block_id = _id_bedrock
+		elif y < height - 3:
+			block_id = _id_stone
+			
+		if block_id != Constants.AIR_BLOCK_ID:
+			chunk.set_voxel_raw(x, y, z, block_id)
+
+# 第二阶段：生成水体和表层（泥土、草等）
+func _generate_water_and_surface(chunk: Chunk) -> void:
+	var cx_offset = chunk.chunk_position.x * Constants.CHUNK_SIZE
+	var cz_offset = chunk.chunk_position.y * Constants.CHUNK_SIZE
+	
+	var step = 2 # Voxel scale optimization
+	var sea_level = 64
+	
+	for x in range(0, Constants.CHUNK_SIZE, step):
+		for z in range(0, Constants.CHUNK_SIZE, step):
+			var world_x = cx_offset + x
+			var world_z = cz_offset + z
+			
+			# 1. Calculate Height (Continental + Erosion)
+			var continental_val = _continental_noise.get_noise_2d(world_x, world_z)
+			var erosion_val = _erosion_noise.get_noise_2d(world_x, world_z)
+			
+			# Map continental noise to base height zones
+			var base_height = 64.0
+			var height_scale = 0.0
+			
+			if continental_val < -0.2: # Ocean
+				base_height = 40.0
+				height_scale = 20.0
+			elif continental_val < 0.0: # Coast/Beach
+				base_height = 64.0
+				height_scale = 5.0
+			elif continental_val < 0.5: # Inland/Plains
+				base_height = 70.0
+				height_scale = 30.0
+			else: # Mountains
+				base_height = 100.0
+				height_scale = 120.0
+				
+			# Apply erosion/detail
+			var final_height = int(base_height + (continental_val * 10.0) + (erosion_val * height_scale))
+			final_height = clamp(final_height, 0, Constants.VOXEL_MAX_HEIGHT - 1)
+			
+			# 2. Determine Biome
+			var temp = _temperature_noise.get_noise_2d(world_x, world_z)
+			var humidity = _humidity_noise.get_noise_2d(world_x, world_z)
+			var biome = _get_biome(final_height, temp, humidity)
+			
+			# Quantize height for optimization
+			var height = int(round(final_height / float(step)) * step)
+			
+			# Fill column with water and surface blocks
+			for i in range(step):
+				for k in range(step):
+					var vx = x + i
+					var vz = z + k
+					
+					if vx >= Constants.CHUNK_SIZE or vz >= Constants.CHUNK_SIZE:
+						continue
+						
+					_fill_surface_column(chunk, vx, vz, height, sea_level, biome)
+
+# 填充表层列（泥土、草、水等）
+func _fill_surface_column(chunk: Chunk, x: int, z: int, height: int, sea_level: int, biome: Resource) -> void:
+	for y in range(height + 1):
+		var block_id = Constants.AIR_BLOCK_ID
+		
+		if y >= height - 3 and y < height:
+			block_id = biome.get_dirt_block()
+		elif y == height:
+			block_id = biome.get_top_block()
+			
+		if block_id != Constants.AIR_BLOCK_ID:
+			chunk.set_voxel_raw(x, y, z, block_id)
+			
+	if height < sea_level:
+		for y in range(height + 1, sea_level + 1):
+			chunk.set_voxel_raw(x, y, z, _id_water)
+
+# 第三阶段：生成矿石和洞穴
+func _generate_ores_and_caves(chunk: Chunk) -> void:
+	_generate_ores(chunk)
+	# TODO: 实现洞穴生成
+
+# 第四阶段：生成装饰物（树木、花草等）
+func _generate_decorations(chunk: Chunk) -> void:
+	decorate_chunk(chunk, _seed)
+
+# 原有的完整生成方法保持不变，以兼容现有代码
 func generate_chunk(chunk: Chunk) -> void:
 	var cx_offset = chunk.chunk_position.x * Constants.CHUNK_SIZE
 	var cz_offset = chunk.chunk_position.y * Constants.CHUNK_SIZE

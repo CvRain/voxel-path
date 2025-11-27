@@ -5,6 +5,7 @@ var chunk_position: Vector2i
 var voxels: PackedByteArray # Stores PALETTE INDICES. 0 is always Air (Global ID 0).
 var palette: Resource # Maps Local Index -> Global ID (Type is Resource to avoid cyclic dependency issues if any, but ideally ChunkPalette)
 var is_modified: bool = false
+var generation_stage: int = 0 # 使用ChunkGenerationStage枚举跟踪生成阶段
 
 # Sections
 var sections: Array[MeshInstance3D] = []

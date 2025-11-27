@@ -3,12 +3,13 @@ extends RefCounted
 
 # 文件头标识 (Magic Number) - 用于识别文件类型
 const MAGIC_HEADER = "VOXC" # Voxel Chunk
-const VERSION = 1
+const VERSION = 2 # 更新版本号以支持生成阶段
 
 # 保存区块到磁盘
 # 格式设计:
 # [Header 4 bytes] "VOXC"
-# [Version 1 byte] 1
+# [Version 1 byte] 2
+# [Generation Stage 1 byte] (Chunk generation stage)
 # [Palette Size 2 bytes] (N)
 # [Palette Data N * 4 bytes] (Global State IDs)
 # [Voxel Data Length 4 bytes] (Compressed Size)
@@ -31,7 +32,10 @@ static func save_chunk(chunk: Chunk, folder_path: String) -> void:
 	file.store_buffer(MAGIC_HEADER.to_ascii_buffer())
 	file.store_8(VERSION)
 	
-	# 2. 序列化 Palette
+	# 2. 写入生成阶段
+	file.store_8(chunk.generation_stage)
+	
+	# 3. 序列化 Palette
 	# 获取 Palette 中的 Global State ID 列表
 	var palette_map = chunk.palette._id_map
 	var palette_size = palette_map.size()
@@ -40,7 +44,7 @@ static func save_chunk(chunk: Chunk, folder_path: String) -> void:
 	for global_state_id in palette_map:
 		file.store_32(global_state_id)
 		
-	# 3. 序列化 Voxel Data
+	# 4. 序列化 Voxel Data
 	# 使用 ZSTD 压缩体素数组
 	# 原始数据是 8-bit 的索引数组，其中包含大量的 0 (空气) 或重复数据
 	# 压缩算法能极大地减小体积，起到类似"稀疏矩阵"存储的效果
@@ -72,11 +76,18 @@ static func load_chunk(chunk: Chunk, folder_path: String) -> bool:
 		return false
 		
 	var version = file.get_8()
-	if version != VERSION:
-		push_warning("Chunk file version mismatch. Expected %d, got %d" % [VERSION, version])
-		# 这里可以添加版本迁移逻辑
+	if version < 1 or version > 2:
+		push_error("Unsupported chunk file version. Expected 1 or 2, got %d" % version)
+		return false
 		
-	# 2. 读取 Palette
+	# 2. 读取生成阶段 (版本2新增)
+	if version >= 2:
+		chunk.generation_stage = file.get_8()
+	else:
+		# 旧版本文件默认为完全生成
+		chunk.generation_stage = preload("res://Scripts/Voxel/chunk_generation_stage.gd").ChunkGenerationStage.FULLY_GENERATED
+		
+	# 3. 读取 Palette
 	var palette_size = file.get_16()
 	var new_id_map: Array[int] = []
 	new_id_map.resize(palette_size)
@@ -91,7 +102,7 @@ static func load_chunk(chunk: Chunk, folder_path: String) -> bool:
 	for i in range(palette_size):
 		chunk.palette._reverse_map[new_id_map[i]] = i
 		
-	# 3. 读取 Voxel Data
+	# 4. 读取 Voxel Data
 	var compressed_size = file.get_32()
 	var compressed_voxels = file.get_buffer(compressed_size)
 	

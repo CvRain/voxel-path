@@ -1,11 +1,19 @@
 extends Node3D
 
+# 引入区块生成阶段枚举
+const ChunkGenerationStage = preload("res://Scripts/Voxel/chunk_generation_stage.gd").ChunkGenerationStage
+
 var _world_generator: Node
 var _fluid_manager: Node
 var _chunks: Dictionary = {} # Vector2i -> Chunk
 var _is_generating: bool = false
 var _is_raining: bool = true # Default to raining for testing
 var _rain_timer: float = 0.0
+
+# 添加生成队列和相关变量
+var _generation_queue: Array = [] # 存储待生成的区块和阶段
+var _generation_timer: float = 0.0
+const GENERATION_INTERVAL: float = 0.01 # 每0.01秒处理一个生成任务
 
 # World Generation Settings
 const WORLD_SIZE_CHUNKS: int = 4 # 4x4 chunks
@@ -49,80 +57,86 @@ func _on_loading_complete() -> void:
 		_generate_world()
 
 func _process(delta: float) -> void:
-	if _is_raining and _fluid_manager:
-		_rain_timer += delta
-		if _rain_timer > 0.05: # 20 ticks per second
-			_rain_timer = 0.0
-			_process_rain()
+	# 处理分阶段地形生成
+	_process_chunk_generation(delta)
 
-func _process_rain() -> void:
-	var keys = _chunks.keys()
-	if keys.is_empty(): return
+# 处理分阶段区块生成
+func _process_chunk_generation(delta: float) -> void:
+	_generation_timer += delta
 	
-	# Process a few random chunks
-	for i in range(3):
-		var key = keys[randi() % keys.size()]
-		var chunk = _chunks[key]
-		var water = BlockRegistry.get_block_by_name("water")
-		if water:
-			_fluid_manager.process_rain_tick(chunk, water.id)
+	if _generation_timer >= GENERATION_INTERVAL and not _generation_queue.is_empty():
+		_generation_timer = 0.0
+		
+		# 从队列中取出一个生成任务
+		var task = _generation_queue.pop_front()
+		var chunk = task.chunk
+		var stage = task.stage
+		
+		# 执行对应阶段的生成
+		_world_generator.generate_chunk_stage(chunk, stage)
+		
+		# 更新区块生成阶段
+		chunk.generation_stage = stage
+		
+		# 如果不是最终阶段，则将下一阶段加入队列
+		if stage < ChunkGenerationStage.FULLY_GENERATED:
+			_enqueue_chunk_generation(chunk, stage + 1)
+		else:
+			# 完全生成后更新网格
+			chunk.generate_mesh()
 
+# 将区块生成任务加入队列
+func _enqueue_chunk_generation(chunk: Chunk, stage: int) -> void:
+	_generation_queue.append({
+		"chunk": chunk,
+		"stage": stage
+	})
+
+# 修改 _generate_world 方法以使用分阶段生成
 func _generate_world() -> void:
-		if _is_generating: return
-		_is_generating = true
-		print("Starting world generation...")
-		
-		var start_time = Time.get_ticks_msec()
-		
-		# 1. Create Chunks
-		for cx in range(WORLD_SIZE_CHUNKS):
-				for cz in range(WORLD_SIZE_CHUNKS):
-						print("Creating chunk %d,%d" % [cx, cz])
-						var chunk_pos = Vector2i(cx, cz)
-						var chunk = Chunk.new(chunk_pos)
-						# Position in world space
-						chunk.position = Vector3(cx * Constants.CHUNK_WORLD_SIZE, 0, cz * Constants.CHUNK_WORLD_SIZE)
-						add_child(chunk)
-						_chunks[chunk_pos] = chunk
-						
-						# Try to load first, if not found, generate
-						var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
-						if not ChunkSerializerScript.load_chunk(chunk, SAVE_DIR_CHUNKS):
-								_world_generator.generate_chunk(chunk)
-						else:
-								print("Loaded chunk %d,%d from disk" % [cx, cz])
-		
-				# 2. Link Neighbors
-		for pos in _chunks:
-				var chunk = _chunks[pos]
-				chunk.neighbor_left = _chunks.get(pos + Vector2i(-1, 0))
-				chunk.neighbor_right = _chunks.get(pos + Vector2i(1, 0))
-				chunk.neighbor_front = _chunks.get(pos + Vector2i(0, -1))
-				chunk.neighbor_back = _chunks.get(pos + Vector2i(0, 1))
-		
-		# 3. Decorate World
-		print("Decorating world...")
-		for chunk in _chunks.values():
-				if chunk.is_modified:
-						_world_generator.decorate_chunk(chunk, _world_generator._seed)
-		
-		# 4. Generate Meshes
-		print("Generating meshes...")
-		var chunks_processed = 0
-		for chunk in _chunks.values():
+	if _is_generating: return
+	_is_generating = true
+	print("Starting world generation...")
+	
+	var start_time = Time.get_ticks_msec()
+	
+	# 1. Create Chunks
+	for cx in range(WORLD_SIZE_CHUNKS):
+		for cz in range(WORLD_SIZE_CHUNKS):
+			print("Creating chunk %d,%d" % [cx, cz])
+			var chunk_pos = Vector2i(cx, cz)
+			var chunk = Chunk.new(chunk_pos)
+			# Position in world space
+			chunk.position = Vector3(cx * Constants.CHUNK_WORLD_SIZE, 0, cz * Constants.CHUNK_WORLD_SIZE)
+			add_child(chunk)
+			_chunks[chunk_pos] = chunk
+			
+			# Try to load first, if not found, generate
+			var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
+			if not ChunkSerializerScript.load_chunk(chunk, SAVE_DIR_CHUNKS):
+				# 将初始生成阶段加入队列
+				_enqueue_chunk_generation(chunk, ChunkGenerationStage.BASE_TERRAIN)
+			else:
+				print("Loaded chunk %d,%d from disk" % [cx, cz])
+				# 已加载的区块直接生成网格
 				chunk.generate_mesh()
-				
-				chunks_processed += 1
-				if chunks_processed % 2 == 0:
-						await get_tree().process_frame
-				
-		var end_time = Time.get_ticks_msec()
-		print("World generation took: %d ms" % (end_time - start_time))
-		
-		# Move player to surface
-		_spawn_player()
-		
-		_is_generating = false
+	
+	# 2. Link Neighbors
+	for pos in _chunks:
+		var chunk = _chunks[pos]
+		chunk.neighbor_left = _chunks.get(pos + Vector2i(-1, 0))
+		chunk.neighbor_right = _chunks.get(pos + Vector2i(1, 0))
+		chunk.neighbor_front = _chunks.get(pos + Vector2i(0, -1))
+		chunk.neighbor_back = _chunks.get(pos + Vector2i(0, 1))
+	
+	var end_time = Time.get_ticks_msec()
+	print("World generation initiated in %d ms" % (end_time - start_time))
+	
+	# Move player to surface
+	_spawn_player()
+	
+	# 不再阻塞等待生成完成
+	# _is_generating = false
 
 func _spawn_player() -> void:
 		var player = $ProtoController

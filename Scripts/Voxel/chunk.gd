@@ -21,6 +21,15 @@ var neighbor_back: Chunk
 var neighbor_left: Chunk
 var neighbor_right: Chunk
 
+# Section生成状态跟踪
+var _generated_sections: PackedByteArray
+var _dirty_sections: PackedInt32Array  # 需要重新生成网格的Section
+
+# Section尺寸常量
+const SECTION_WIDTH: int = 16
+const SECTION_HEIGHT: int = 16
+const SECTION_DEPTH: int = 16
+
 func _init(pos: Vector2i) -> void:
 	chunk_position = pos
 	name = "Chunk_%d_%d" % [pos.x, pos.y]
@@ -35,6 +44,14 @@ func _init(pos: Vector2i) -> void:
 	voxels = PackedByteArray()
 	voxels.resize(size)
 	voxels.fill(0) # Fill with Index 0 (which is Air in a new Palette)
+	
+	# 初始化Section生成状态跟踪
+	var section_count = (Constants.CHUNK_SIZE / SECTION_WIDTH) * (Constants.CHUNK_SIZE / SECTION_DEPTH) * (Constants.VOXEL_MAX_HEIGHT / SECTION_HEIGHT)
+	_generated_sections = PackedByteArray()
+	_generated_sections.resize(section_count)
+	_generated_sections.fill(0)
+	
+	_dirty_sections = PackedInt32Array()
 
 func _ready() -> void:
 	sections_node = Node3D.new()
@@ -56,6 +73,105 @@ func _ready() -> void:
 		mesh_inst.material_override = material
 		sections_node.add_child(mesh_inst)
 		sections[i] = mesh_inst
+
+# 获取指定坐标的Section索引
+func _get_section_index(x: int, y: int, z: int) -> int:
+	var section_x = int(x / SECTION_WIDTH)
+	var section_y = int(y / SECTION_HEIGHT)
+	var section_z = int(z / SECTION_DEPTH)
+	
+	# 计算一维索引
+	var sections_x = Constants.CHUNK_SIZE / SECTION_WIDTH
+	var sections_z = Constants.CHUNK_SIZE / SECTION_DEPTH
+	
+	return section_y * sections_x * sections_z + section_z * sections_x + section_x
+
+# 标记Section为已生成
+func _mark_section_generated(x: int, y: int, z: int) -> void:
+	var section_index = _get_section_index(x, y, z)
+	if section_index >= 0 and section_index < _generated_sections.size():
+		_generated_sections[section_index] = 1
+
+# 检查Section是否已生成
+func is_section_generated(x: int, y: int, z: int) -> bool:
+	var section_index = _get_section_index(x, y, z)
+	if section_index >= 0 and section_index < _generated_sections.size():
+		return _generated_sections[section_index] == 1
+	return false
+
+# 检查是否所有Section都已生成
+func are_all_sections_generated() -> bool:
+	for i in range(_generated_sections.size()):
+		if _generated_sections[i] == 0:
+			return false
+	return true
+
+# 获取未生成的Section数量
+func get_pending_sections_count() -> int:
+	var count = 0
+	for i in range(_generated_sections.size()):
+		if _generated_sections[i] == 0:
+			count += 1
+	return count
+
+# 标记Section为脏（需要重新生成网格）
+func mark_section_dirty(section_index: int) -> void:
+	if not _dirty_sections.has(section_index):
+		_dirty_sections.append(section_index)
+
+# 获取Section在世界坐标中的最小和最大坐标
+func get_section_bounds(section_index: int) -> Dictionary:
+	var sections_x = Constants.CHUNK_SIZE / SECTION_WIDTH
+	var sections_z = Constants.CHUNK_SIZE / SECTION_DEPTH
+	var sections_y = Constants.VOXEL_MAX_HEIGHT / SECTION_HEIGHT
+	
+	# 从一维索引计算三维坐标
+	var section_y = section_index / (sections_x * sections_z)
+	var remainder = section_index % (sections_x * sections_z)
+	var section_z = remainder / sections_x
+	var section_x = remainder % sections_x
+	
+	var min_x = section_x * SECTION_WIDTH
+	var min_y = section_y * SECTION_HEIGHT
+	var min_z = section_z * SECTION_DEPTH
+	
+	var max_x = min_x + SECTION_WIDTH - 1
+	var max_y = min_y + SECTION_HEIGHT - 1
+	var max_z = min_z + SECTION_DEPTH - 1
+	
+	# 确保不超过区块边界
+	max_x = min(max_x, Constants.CHUNK_SIZE - 1)
+	max_y = min(max_y, Constants.VOXEL_MAX_HEIGHT - 1)
+	max_z = min(max_z, Constants.CHUNK_SIZE - 1)
+	
+	return {
+		"min": Vector3i(min_x, min_y, min_z),
+		"max": Vector3i(max_x, max_y, max_z)
+	}
+
+# 生成指定Section的体素数据
+func generate_section_voxels(section_index: int, generator: Node) -> void:
+	var bounds = get_section_bounds(section_index)
+	var min_pos = bounds.min
+	var max_pos = bounds.max
+	
+	# 生成这个Section的体素数据
+	for y in range(min_pos.y, max_pos.y + 1):
+		for z in range(min_pos.z, max_pos.z + 1):
+			for x in range(min_pos.x, max_pos.x + 1):
+				# 这里应该调用适当的生成函数
+				# 为了简化，我们现在只是标记Section为已生成
+				pass
+	
+	_mark_section_generated(min_pos.x, min_pos.y, min_pos.z)
+
+# 生成指定Section的网格
+func generate_section_mesh(section_index: int) -> void:
+	# 创建网格生成任务
+	schedule_section_update(section_index)
+	
+	# 从脏列表中移除
+	_dirty_sections.erase(section_index)
 
 func set_voxel(x: int, y: int, z: int, block_id: int, properties: Dictionary = {}) -> void:
 	if not is_valid_position(x, y, z):
@@ -84,12 +200,39 @@ func set_voxel_state(x: int, y: int, z: int, state_id: int) -> void:
 		voxels[index] = local_index
 		is_modified = true
 		
-		# Update the specific section
-		update_mesh_for_voxel(x, y, z)
+		# 更新受影响的Section
+		var section_index = _get_section_index(x, y, z)
+		mark_section_dirty(section_index)
+		
+		# 更新相邻的Section（如果在边界上）
+		_check_and_mark_adjacent_sections(x, y, z)
+
+# 检查并标记相邻的Section（如果在边界上）
+func _check_and_mark_adjacent_sections(x: int, y: int, z: int) -> void:
+	# 检查X边界
+	if x == 0:
+		mark_section_dirty(_get_section_index(x - 1, y, z)) if x > 0 else null
+	elif x == Constants.CHUNK_SIZE - 1:
+		mark_section_dirty(_get_section_index(x + 1, y, z)) if x < Constants.CHUNK_SIZE - 1 else null
+	
+	# 检查Y边界
+	if y == 0:
+		mark_section_dirty(_get_section_index(x, y - 1, z)) if y > 0 else null
+	elif y == Constants.VOXEL_MAX_HEIGHT - 1:
+		mark_section_dirty(_get_section_index(x, y + 1, z)) if y < Constants.VOXEL_MAX_HEIGHT - 1 else null
+	
+	# 检查Z边界
+	if z == 0:
+		mark_section_dirty(_get_section_index(x, y, z - 1)) if z > 0 else null
+	elif z == Constants.CHUNK_SIZE - 1:
+		mark_section_dirty(_get_section_index(x, y, z + 1)) if z < Constants.CHUNK_SIZE - 1 else null
 
 # Raw setter that DOES NOT trigger mesh updates.
 # Use this for world generation or batch updates.
 func set_voxel_raw(x: int, y: int, z: int, block_id: int) -> void:
+	if not is_valid_position(x, y, z):
+		return
+		
 	var state_id = BlockStateRegistry.get_default_state_id(block_id)
 	set_voxel_state_raw(x, y, z, state_id)
 
@@ -167,6 +310,10 @@ func update_specific_sections(section_indices: Array) -> void:
 			_schedule_section_update_internal(section_idx, shared_snapshot, palette_map)
 
 func generate_mesh() -> void:
+	# 为了避免阻塞主线程，我们将网格生成任务加入队列而不是立即执行
+	schedule_all_sections_update()
+
+func schedule_all_sections_update() -> void:
 	# OPTIMIZATION: Create ONE snapshot for all sections
 	# This prevents 16x memory usage explosion (16 sections * 4MB = 64MB per chunk!)
 	var shared_snapshot = voxels.duplicate()

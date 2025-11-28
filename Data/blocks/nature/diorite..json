@@ -1,0 +1,38 @@
+{
+  "name": "diorite",
+  "display_name": "Diorite Block",
+  "category": "nature",
+  "description": "Diorite Block",
+
+  "textures": {
+    "all": "res://Assets/Textures/Natural/diorite.png"
+  },
+
+  "properties": {
+    "hardness": 0.2,
+    "resistance": 0.2,
+    "is_solid": true,
+    "is_transparent": false
+  },
+
+  "physics": {
+    "has_collision": true,
+    "friction": 0.9,
+    "bounce": 0.0
+  },
+
+  "interactions": {
+    "can_place": true,
+    "can_break": true,
+    "tool_required": "none",
+    "mine_level": 0,
+    "mine_time": 0.2
+  },
+
+  "rendering": {
+    "blend_mode": "opaque",
+    "cull_mode": "back",
+    "cast_shadow": true,
+    "per_face_texture": false
+  }
+}

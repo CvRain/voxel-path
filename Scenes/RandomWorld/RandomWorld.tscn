@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3 uid="uid://1ax3es7hqrha"]
 
 [ext_resource type="Script" uid="uid://crglb4taalbcy" path="res://Scenes/RandomWorld/RandomWorld.gd" id="1_script"]
-[ext_resource type="PackedScene" uid="uid://bs72ogkvdd7d6" path="res://Scenes/PlayerController/Player.tscn" id="2_player"]
+[ext_resource type="PackedScene" uid="uid://bs72ogkvdd7d6" path="res://Scenes/PlayerController/PlayerController.tscn" id="2_player"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_main"]
 sky_top_color = Color(0.384314, 0.454902, 0.54902, 1)
@@ -29,22 +29,4 @@ shadow_enabled = true
 
 [node name="ProtoController" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 80, 16)
-can_move = true
-has_gravity = true
-can_jump = true
-can_sprint = true
-can_fly = true
-can_noclip = true
-step_height = 1.1
-step_smooth_time = 0.15
-look_speed = 0.0035
-base_speed = 6.0
-sprint_speed = 9.0
-jump_velocity = 4.8
-fly_speed = 12.0
-acceleration = 12.0
-deacceleration = 16.0
-max_pitch_degrees = 89.0
-input_noclip_toggle = "noclip_toggle"
 debug_enabled = true
-debug_interval = 0.5

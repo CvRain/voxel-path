@@ -12,6 +12,7 @@
     "water.json",
     "cobblestone.json",
     "oak_log.json",
-    "oak_leaves.json"
+    "oak_leaves.json",
+    "snow.json"
   ]
 }

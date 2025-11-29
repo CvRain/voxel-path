@@ -19,6 +19,7 @@ glow_enabled = true
 
 [node name="RandomWorld" type="Node3D"]
 script = ExtResource("1_script")
+DEBUG_GEN = false
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_main")
@@ -29,4 +30,3 @@ shadow_enabled = true
 
 [node name="ProtoController" parent="." instance=ExtResource("2_player")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 16, 80, 16)
-debug_enabled = true

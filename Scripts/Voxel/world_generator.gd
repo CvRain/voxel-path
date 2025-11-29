@@ -403,7 +403,6 @@ func _generate_vein_in_section(chunk: Chunk, start_x: int, start_y: int, start_z
 		if current_x >= min_pos.x and current_x <= max_pos.x and \
 		   current_y >= min_pos.y and current_y <= max_pos.y and \
 		   current_z >= min_pos.z and current_z <= max_pos.z:
-			
 			if chunk.is_valid_position(current_x, current_y, current_z):
 				# Only replace stone
 				var current_id = chunk.get_voxel(current_x, current_y, current_z)
@@ -753,6 +752,189 @@ func _get_cached_biome(world_x: int, world_z: int) -> Resource:
 		_biome_cache.clear()
 	
 	return biome
+
+# 异步生成：将单个 Section 的体素生成任务提交到工作线程池
+func generate_chunk_section_async(chunk: Chunk, section_index: int, stage: int) -> void:
+	if not is_instance_valid(chunk):
+		return
+
+	# 准备快照数据（小且只读）
+	var bounds = chunk.get_section_bounds(section_index)
+	var min_pos = bounds.min
+	var max_pos = bounds.max
+	var cx = chunk.chunk_position.x
+	var cz = chunk.chunk_position.y
+
+	# Snapshot primitive values
+	var snap = {
+		"seed_val": _seed,
+		"cx": cx,
+		"cz": cz,
+		"min": min_pos,
+		"max": max_pos,
+		"stage": stage,
+		"section_index": section_index,
+		"id_bedrock": _id_bedrock,
+		"id_stone": _id_stone,
+		"id_dirt": _id_dirt,
+		"id_grass": _id_grass,
+		"id_water": _id_water,
+		"id_log": _id_log,
+		"id_leaves": _id_leaves,
+		"id_sand": _id_sand,
+		"ore_ids": _ore_ids.duplicate()
+	}
+
+	# Submit worker task. Bind snapshot and the chunk reference as argument.
+	WorkerThreadPool.add_task(_thread_generate_section.bind(snap, chunk), true, "Section Gen %s/%d" % [chunk.name, section_index])
+
+
+# 后台线程函数：计算该 section 的体素并回写主线程（注意：此函数运行在工作线程，不应访问可变 Node 状态）
+func _thread_generate_section(snap: Dictionary, chunk_ref: Chunk) -> void:
+	# 创建本地噪声实例，参数与主生成器一致
+	var s_seed = snap.seed_val
+	var continental = FastNoiseLite.new()
+	continental.seed = s_seed
+	continental.frequency = 0.0008
+	continental.fractal_type = FastNoiseLite.FRACTAL_FBM
+	continental.fractal_octaves = 5
+	continental.fractal_gain = 0.5
+	continental.fractal_weighted_strength = 0.0
+	continental.fractal_lacunarity = 2.0
+
+	var erosion = FastNoiseLite.new()
+	erosion.seed = s_seed + 1
+	erosion.frequency = 0.005
+	erosion.fractal_type = FastNoiseLite.FRACTAL_RIDGED
+	erosion.fractal_octaves = 4
+	erosion.fractal_gain = 0.4
+	erosion.fractal_weighted_strength = 0.0
+	erosion.fractal_lacunarity = 2.3
+
+	var temperature = FastNoiseLite.new()
+	temperature.seed = s_seed + 2
+	temperature.frequency = 0.0015
+	temperature.fractal_type = FastNoiseLite.FRACTAL_FBM
+	temperature.fractal_octaves = 3
+	temperature.fractal_gain = 0.5
+	temperature.fractal_lacunarity = 2.0
+
+	var humidity = FastNoiseLite.new()
+	humidity.seed = s_seed + 3
+	humidity.frequency = 0.0015
+	humidity.fractal_type = FastNoiseLite.FRACTAL_FBM
+	humidity.fractal_octaves = 3
+	humidity.fractal_gain = 0.5
+	humidity.fractal_lacunarity = 2.0
+
+	# Shortcuts
+	var cx = snap.cx
+	var cz = snap.cz
+	var min_pos = snap.min
+	var max_pos = snap.max
+	var stage = snap.stage
+	var sea_level = 64
+
+	var out = PackedInt32Array()
+
+	# Iterate section area and compute blocks
+	for x in range(min_pos.x, max_pos.x + 1):
+		for z in range(min_pos.z, max_pos.z + 1):
+			var world_x = cx * Constants.CHUNK_SIZE + x
+			var world_z = cz * Constants.CHUNK_SIZE + z
+
+			# Height calculation same as main generator (deterministic)
+			var continental_val = continental.get_noise_2d(world_x, world_z)
+			var erosion_val = erosion.get_noise_2d(world_x, world_z)
+			var base_height = 64.0
+			var height_scale = 0.0
+			if continental_val < -0.2:
+				base_height = 40.0
+				height_scale = 20.0
+			elif continental_val < 0.0:
+				base_height = 64.0
+				height_scale = 5.0
+			elif continental_val < 0.5:
+				base_height = 70.0
+				height_scale = 30.0
+			else:
+				base_height = 100.0
+				height_scale = 120.0
+
+			var final_height = int(base_height + (continental_val * 10.0) + (erosion_val * height_scale))
+			final_height = clamp(final_height, 0, Constants.VOXEL_MAX_HEIGHT - 1)
+
+			# Biome determination (use local temperature/humidity)
+			var temp_val = (temperature.get_noise_2d(world_x, world_z) + 1.0) / 2.0
+			var hum_val = (humidity.get_noise_2d(world_x, world_z) + 1.0) / 2.0
+			# Simple biome pick to match _get_biome behaviour
+			var biome_index = 2
+			if temp_val < 0.2:
+				biome_index = 6
+			elif temp_val < 0.4:
+				if hum_val < 0.3:
+					biome_index = 7
+				elif hum_val < 0.7:
+					biome_index = 2
+				else:
+					biome_index = 3
+			elif temp_val < 0.8:
+				if hum_val < 0.2:
+					biome_index = 5
+				elif hum_val < 0.6:
+					biome_index = 2
+				elif hum_val < 0.8:
+					biome_index = 3
+				else:
+					biome_index = 4
+			else:
+				biome_index = 5
+
+			# Fill voxels according to stage
+			if stage == ChunkGenerationStage.BASE_TERRAIN:
+				for y in range(min_pos.y, min(max_pos.y, final_height) + 1):
+					var bid = Constants.AIR_BLOCK_ID
+					if y == 0:
+						bid = snap.id_bedrock
+					elif y < final_height - 3:
+						bid = snap.id_stone
+					if bid != Constants.AIR_BLOCK_ID:
+						out.push_back(x)
+						out.push_back(y)
+						out.push_back(z)
+						out.push_back(bid)
+			elif stage == ChunkGenerationStage.WATER_AND_SURFACE:
+				for y in range(min_pos.y, min(max_pos.y, final_height) + 1):
+					var bid2 = Constants.AIR_BLOCK_ID
+					if y >= final_height - 3 and y < final_height:
+						# use dirt as fallback
+						bid2 = snap.id_dirt
+					elif y == final_height:
+						bid2 = snap.id_grass
+					if bid2 != Constants.AIR_BLOCK_ID:
+						out.push_back(x)
+						out.push_back(y)
+						out.push_back(z)
+						out.push_back(bid2)
+				# water
+				if final_height < sea_level:
+					for y in range(max(final_height + 1, min_pos.y), min(max_pos.y, sea_level) + 1):
+						out.push_back(x)
+						out.push_back(y)
+						out.push_back(z)
+						out.push_back(snap.id_water)
+			elif stage == ChunkGenerationStage.ORES_AND_CAVES:
+				# simplified ores: place a few veins deterministically per section
+				var rng = RandomNumberGenerator.new()
+				var s_section = snap.section_index
+				rng.seed = int(hash(Vector2i(cx, cz).x) + s_section + 12345)
+				# For simplicity, skip heavy ore generation in worker for now
+				pass
+
+	# Dispatch results back to main thread: call chunk's apply
+	# PackedInt32Array can be passed through call_deferred
+	# Ensure we pass section_index first to match Chunk._apply_section_voxels(section_index, voxel_data, stage)
+	chunk_ref.call_deferred("_apply_section_voxels", snap.section_index, out, stage)
 
 func get_noise_height(world_x: int, world_z: int) -> int:
 	# Helper for player spawn

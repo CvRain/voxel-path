@@ -1,5 +1,44 @@
 extends Node3D
 
+var _unload_queue: Array = [] # 待卸载区块队列
+var _unload_timer: float = 0.0
+const UNLOAD_INTERVAL: float = 0.01 # 每0.01秒处理一个卸载任务
+var _max_unloads_per_frame: int = 2
+
+# 分帧异步卸载区块
+func _process(delta: float) -> void:
+	# ...existing code...
+	_process_chunk_generation(delta)
+	_process_chunk_unload(delta)
+
+func _process_chunk_unload(delta: float) -> void:
+	_unload_timer += delta
+	if _unload_timer >= UNLOAD_INTERVAL and not _unload_queue.is_empty():
+		_unload_timer = 0.0
+		var processed = 0
+		while processed < _max_unloads_per_frame and not _unload_queue.is_empty():
+			var chunk_pos = _unload_queue.pop_front()
+			if _chunks.has(chunk_pos):
+				var chunk = _chunks[chunk_pos]
+				# 1. 保存区块到磁盘
+				var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
+				ChunkSerializerScript.save_chunk(chunk, SAVE_DIR_CHUNKS)
+				# 2. 断开邻居引用
+				chunk.neighbor_left = null
+				chunk.neighbor_right = null
+				chunk.neighbor_front = null
+				chunk.neighbor_back = null
+				# 3. 从场景树中移除并释放
+				chunk.queue_free()
+				_chunks.erase(chunk_pos)
+				print("[UNLOAD] 区块卸载完成: %s" % str(chunk_pos))
+			processed += 1
+
+# 异步卸载区块接口（加入队列）
+func unload_chunk_async(chunk_pos: Vector2i) -> void:
+	if not _unload_queue.has(chunk_pos):
+		_unload_queue.append(chunk_pos)
+
 # 引入区块生成阶段枚举
 const ChunkGenerationStage = preload("res://Scripts/Voxel/chunk_generation_stage.gd").ChunkGenerationStage
 
@@ -11,7 +50,7 @@ var _is_raining: bool = true # Default to raining for testing
 var _rain_timer: float = 0.0
 
 # 添加生成队列和相关变量
-var _generation_queue: Array = [] # 存储待生成的区块和阶段
+var _generation_queue: Array = [] # 优先级队列，元素为 {chunk, stage, priority}
 var _generation_timer: float = 0.0
 const GENERATION_INTERVAL: float = 0.01 # 每0.01秒处理一个生成任务
 
@@ -56,40 +95,52 @@ func _on_loading_complete() -> void:
 		
 		_generate_world()
 
-func _process(delta: float) -> void:
-	# 处理分阶段地形生成
-	_process_chunk_generation(delta)
+var _max_generations_per_frame: int = 2 # 每帧最多处理的生成任务数（动态调整）
+const MIN_GENERATIONS_PER_FRAME: int = 1
+const MAX_GENERATIONS_PER_FRAME: int = 8
 
-# 处理分阶段区块生成
+# 处理分阶段区块生成（动态限流）
 func _process_chunk_generation(delta: float) -> void:
 	_generation_timer += delta
-	
 	if _generation_timer >= GENERATION_INTERVAL and not _generation_queue.is_empty():
 		_generation_timer = 0.0
-		
-		# 从队列中取出一个生成任务
-		var task = _generation_queue.pop_front()
-		var chunk = task.chunk
-		var stage = task.stage
-		
-		# 执行对应阶段的生成
-		_world_generator.generate_chunk_stage(chunk, stage)
-		
-		# 更新区块生成阶段
-		chunk.generation_stage = stage
-		
-		# 如果不是最终阶段，则将下一阶段加入队列
-		if stage < ChunkGenerationStage.FULLY_GENERATED:
-			_enqueue_chunk_generation(chunk, stage + 1)
+		# 根据队列长度动态调整每帧处理数量
+		var qlen = _generation_queue.size()
+		if qlen > 100:
+			_max_generations_per_frame = MAX_GENERATIONS_PER_FRAME
+		elif qlen > 50:
+			_max_generations_per_frame = 6
+		elif qlen > 20:
+			_max_generations_per_frame = 4
 		else:
-			# 完全生成后更新网格
-			chunk.generate_mesh()
+			_max_generations_per_frame = MIN_GENERATIONS_PER_FRAME
+		# 按优先级弹出最高优先级任务（heap结构，priority越小越优先）
+		_generation_queue.sort_custom(func(a, b): return a.priority < b.priority)
+		var processed = 0
+		while processed < _max_generations_per_frame and not _generation_queue.is_empty():
+			var task = _generation_queue.pop_front()
+			var chunk = task.chunk
+			var stage = task.stage
+			# 执行对应阶段的生成
+			_world_generator.generate_chunk_stage(chunk, stage)
+			# 更新区块生成阶段
+			chunk.generation_stage = stage
+			# 进度反馈
+			print("[GEN] 处理区块生成: %s 阶段=%d 剩余队列=%d 本帧已处理=%d" % [chunk.name, stage, _generation_queue.size(), processed + 1])
+			# 如果不是最终阶段，则将下一阶段加入队列
+			if stage < ChunkGenerationStage.FULLY_GENERATED:
+				_enqueue_chunk_generation(chunk, stage + 1, task.priority)
+			else:
+				chunk.generate_mesh()
+			processed += 1
 
 # 将区块生成任务加入队列
-func _enqueue_chunk_generation(chunk: Chunk, stage: int) -> void:
+func _enqueue_chunk_generation(chunk: Chunk, stage: int, priority: int = 0) -> void:
+	# priority: 距离玩家/视野评分，越小越优先
 	_generation_queue.append({
 		"chunk": chunk,
-		"stage": stage
+		"stage": stage,
+		"priority": priority
 	})
 
 # 修改 _generate_world 方法以使用分阶段生成
@@ -106,19 +157,18 @@ func _generate_world() -> void:
 			print("Creating chunk %d,%d" % [cx, cz])
 			var chunk_pos = Vector2i(cx, cz)
 			var chunk = Chunk.new(chunk_pos)
-			# Position in world space
 			chunk.position = Vector3(cx * Constants.CHUNK_WORLD_SIZE, 0, cz * Constants.CHUNK_WORLD_SIZE)
 			add_child(chunk)
 			_chunks[chunk_pos] = chunk
-			
 			# Try to load first, if not found, generate
 			var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
 			if not ChunkSerializerScript.load_chunk(chunk, SAVE_DIR_CHUNKS):
-				# 将初始生成阶段加入队列
-				_enqueue_chunk_generation(chunk, ChunkGenerationStage.BASE_TERRAIN)
+				# 计算优先级：以世界中心为基准，距离越近优先级越高
+				var center = Vector2i(WORLD_SIZE_CHUNKS / 2, WORLD_SIZE_CHUNKS / 2)
+				var dist = abs(cx - center.x) + abs(cz - center.y)
+				_enqueue_chunk_generation(chunk, ChunkGenerationStage.BASE_TERRAIN, dist)
 			else:
 				print("Loaded chunk %d,%d from disk" % [cx, cz])
-				# 已加载的区块直接生成网格
 				chunk.generate_mesh()
 	
 	# 2. Link Neighbors

@@ -1,6 +1,77 @@
 class_name WorldGenerator
 extends Node
 
+# --- 异步worker结果队列，主线程轮询处理 ---
+var pending_results: Array = []
+
+# 异步worker任务接口
+func generate_chunk_stage_async(chunk: Chunk, stage: int) -> void:
+	var chunk_pos = chunk.chunk_position
+	var params = {}
+	var task_func = func():
+		var res = {}
+		match stage:
+			ChunkGenerationStage.BASE_TERRAIN:
+				res = _generate_base_terrain_worker(chunk_pos, params)
+			ChunkGenerationStage.WATER_AND_SURFACE:
+				res = _generate_water_and_surface_worker(chunk_pos, params)
+			ChunkGenerationStage.ORES_AND_CAVES:
+				res = _generate_ores_and_caves_worker(chunk_pos, params)
+			ChunkGenerationStage.DECORATIONS:
+				res = _generate_decorations_worker(chunk_pos, params)
+		# 返回结果和区块信息
+		return {
+			"chunk_pos": chunk_pos,
+			"stage": stage,
+			"result": res,
+			"chunk_ref": chunk # 可选，主线程可用
+		}
+	WorkerThreadPool.add_task(
+		task_func,
+		false,
+		"ChunkGenAsync %s stage=%d" % [str(chunk_pos), stage]
+	)
+
+# 主线程每帧轮询pending_results，应用结果
+func process_pending_results() -> void:
+	for data in pending_results:
+		var chunk = data.get("chunk_ref")
+		var stage = data.get("stage")
+		var result = data.get("result")
+		# TODO: 按stage应用结果到chunk，可自定义回调
+		# 例如：chunk.apply_stage_result(stage, result)
+	pending_results.clear()
+
+# 各阶段worker实现（返回结果数据，主线程应用）
+
+# 异步worker实现：基础地形
+func _generate_base_terrain_worker(_chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
+	var result = {}
+	# ...生成地形数据...
+	return result
+
+
+# 异步worker实现：水体与表层
+func _generate_water_and_surface_worker(_chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
+	var result = {}
+	# ...生成水体与表层数据...
+	return result
+
+
+# 异步worker实现：矿脉与洞穴
+func _generate_ores_and_caves_worker(_chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
+	var result = {}
+	# ...生成矿脉与洞穴数据...
+	return result
+
+
+# 异步worker实现：装饰物
+func _generate_decorations_worker(_chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
+	var result = {}
+	# ...生成装饰物数据...
+	return result
+
+
 # 引入区块生成阶段枚举
 const ChunkGenerationStage = preload("res://Scripts/Voxel/chunk_generation_stage.gd").ChunkGenerationStage
 
@@ -119,20 +190,17 @@ func _initialize_biomes() -> void:
 
 func _get_biome(height: int, temp: float, humidity: float) -> Resource:
 	var sea_level = 64
-	
 	# 1. Ocean / Beach
 	if height < sea_level - 5:
 		return _biomes[0] # Ocean
 	elif height < sea_level + 2:
 		return _biomes[1] # Beach
-		
 	# 2. Mountains (High Altitude)
 	if height > 140:
 		if temp < 0.0:
 			return _biomes[6] # Snowy Peaks
 		else:
 			return _biomes[7] # Stone Peaks
-			
 	# 3. Land Biomes (Based on Temp/Humidity)
 	if temp > 0.5: # Hot
 		if humidity < -0.2:
@@ -148,8 +216,8 @@ func _get_biome(height: int, temp: float, humidity: float) -> Resource:
 			return _biomes[3] # Forest
 		else:
 			return _biomes[2] # Plains
-			
-	return _biomes[2] # Fallback
+	# Fallback
+	return _biomes[2]
 
 func cache_block_ids() -> void:
 	var bedrock = BlockRegistry.get_block_by_name("bedrock")

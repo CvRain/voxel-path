@@ -2,6 +2,8 @@ class_name Chunk
 extends Node3D
 
 var chunk_position: Vector2i
+var area: Area3D
+var collision_shape: CollisionShape3D
 var voxels: PackedByteArray # Stores PALETTE INDICES. 0 is always Air (Global ID 0).
 var palette: Resource # Maps Local Index -> Global ID (Type is Resource to avoid cyclic dependency issues if any, but ideally ChunkPalette)
 var is_modified: bool = false
@@ -40,22 +42,49 @@ func _ready() -> void:
 	sections_node = Node3D.new()
 	sections_node.name = "Sections"
 	add_child(sections_node)
-	
+
 	var num_sections = ceil(Constants.VOXEL_MAX_HEIGHT / float(Constants.CHUNK_SECTION_SIZE))
 	sections.resize(num_sections)
 	section_bodies.resize(num_sections)
-	
+
 	var material = StandardMaterial3D.new()
 	material.albedo_texture = TextureManager.get_main_atlas()
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	material.vertex_color_use_as_albedo = true # Enabled for biome tinting
-	
+
 	for i in range(num_sections):
 		var mesh_inst = MeshInstance3D.new()
 		mesh_inst.name = "Section_%d" % i
 		mesh_inst.material_override = material
 		sections_node.add_child(mesh_inst)
 		sections[i] = mesh_inst
+
+	# 添加区块碰撞体积（Area3D）
+	area = Area3D.new()
+	area.name = "ChunkArea"
+	add_child(area)
+	collision_shape = CollisionShape3D.new()
+	var shape = BoxShape3D.new()
+	shape.size = Vector3(Constants.CHUNK_SIZE, Constants.VOXEL_MAX_HEIGHT, Constants.CHUNK_SIZE) * Constants.VOXEL_SIZE
+	collision_shape.shape = shape
+	area.add_child(collision_shape)
+	area.position = Vector3(Constants.CHUNK_SIZE, Constants.VOXEL_MAX_HEIGHT, Constants.CHUNK_SIZE) * Constants.VOXEL_SIZE * 0.5
+	area.connect("body_entered", Callable(self, "_on_body_entered"))
+	area.connect("body_exited", Callable(self, "_on_body_exited"))
+## 世界坐标转区块坐标静态方法
+static func world_to_chunk_pos(world_pos: Vector3) -> Vector2i:
+	var chunk_x = int(floor(world_pos.x / (Constants.CHUNK_SIZE * Constants.VOXEL_SIZE)))
+	var chunk_z = int(floor(world_pos.z / (Constants.CHUNK_SIZE * Constants.VOXEL_SIZE)))
+	return Vector2i(chunk_x, chunk_z)
+
+## 玩家进入/离开区块信号回调
+func _on_body_entered(body: Node) -> void:
+	if body.is_in_group("player"):
+		print("玩家进入区块:", chunk_position)
+
+func _on_body_exited(body: Node) -> void:
+	if body.is_in_group("player"):
+		print("玩家离开区块:", chunk_position)
 
 func set_voxel(x: int, y: int, z: int, block_id: int, properties: Dictionary = {}) -> void:
 	if not is_valid_position(x, y, z):

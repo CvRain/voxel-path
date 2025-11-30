@@ -1,8 +1,6 @@
 # Scripts/Voxel/block_registry.gd
-class_name BlockRegistry
 extends Node
 
-static var _instance: BlockRegistry
 static var _blocks: Dictionary = {}
 static var _block_names: Dictionary = {}
 static var _next_free_id: int = 1 # Start from 1, 0 is reserved for Air
@@ -11,24 +9,20 @@ static var _next_free_id: int = 1 # Start from 1, 0 is reserved for Air
 const MAPPING_FILE_PATH: String = "user://level_block_mappings.json"
 
 func _enter_tree() -> void:
-	if _instance != null:
-		queue_free()
-		return
-	_instance = self
-	set_process_mode(Node.PROCESS_MODE_ALWAYS)
-	
 	# Load existing mappings if available
 	_load_id_mappings()
 
 static func register_block(block: BlockData) -> bool:
 	if block.name.is_empty():
-		MyLogger.error("Block name cannot be empty")
+		push_error("[BlockRegistry] Block name cannot be empty! BlockData: %s" % str(block))
+		MyLogger.error("Block name cannot be empty! BlockData: %s" % str(block))
 		return false
-	
+
 	if block.name in _block_names:
+		push_error("[BlockRegistry] Block name already registered: %s" % block.name)
 		MyLogger.error("Block name already registered: %s" % block.name)
 		return false
-	
+
 	# Dynamic ID Allocation with Persistence
 	if block.name == "air":
 		block.id = Constants.AIR_BLOCK_ID # 0
@@ -46,9 +40,14 @@ static func register_block(block: BlockData) -> bool:
 			_next_free_id += 1
 			# Save the new mapping immediately (or batch save later)
 			_save_id_mapping(block.name, block.id)
-	
+
+	if block.id < 0:
+		push_warning("[BlockRegistry] Registered block with invalid ID: %s (%d)" % [block.name, block.id])
+		MyLogger.warn("Registered block with invalid ID: %s (%d)" % [block.name, block.id])
+
 	_blocks[block.id] = block
 	_block_names[block.name] = block.id
+	MyLogger.info("[BlockRegistry] Registered block: %s (ID=%d)" % [block.name, block.id])
 	return true
 
 # --- Persistence Logic ---
@@ -100,7 +99,12 @@ static func get_block(block_id: int) -> BlockData:
 
 static func get_block_by_name(block_name: String) -> BlockData:
 	var id = _block_names.get(block_name, -1)
-	return _blocks.get(id) if id >= 0 else null
+	var block = _blocks.get(id) if id >= 0 else null
+	if block:
+		print("[BlockRegistry] get_block_by_name:", block_name, "id:", block.id)
+	else:
+		print("[BlockRegistry] get_block_by_name:", block_name, "NOT FOUND!")
+	return block
 
 static func get_all_block_ids() -> Array:
 	return _blocks.keys()
@@ -118,6 +122,3 @@ static func debug_print_blocks() -> void:
 		print("  [%3d] %-20s %-30s [%s]" % [block_id, block.name, block.display_name, block.category])
 	for i in range(60):
 		print("=")
-
-static func get_instance() -> BlockRegistry:
-	return _instance

@@ -1,7 +1,11 @@
-[gd_scene load_steps=6 format=3 uid="uid://1ax3es7hqrha"]
+[gd_scene load_steps=10 format=3 uid="uid://1ax3es7hqrha"]
 
 [ext_resource type="Script" uid="uid://crglb4taalbcy" path="res://Scenes/RandomWorld/RandomWorld.gd" id="1_script"]
 [ext_resource type="PackedScene" uid="uid://bs72ogkvdd7d6" path="res://Scenes/PlayerController/Player.tscn" id="2_player"]
+[ext_resource type="Script" uid="uid://dtpipcb0bq7hi" path="res://Scripts/Voxel/block_registry.gd" id="3_74rpx"]
+[ext_resource type="Script" uid="uid://ccb4n6nggp6j5" path="res://Scripts/Core/world_manager.gd" id="3_j4c3e"]
+[ext_resource type="Script" uid="uid://saejvypj6sh1" path="res://Scripts/Voxel/fluid_manager.gd" id="6_6pqbe"]
+[ext_resource type="Script" uid="uid://b3y2e5vvrivqu" path="res://Scripts/Voxel/world_generator.gd" id="7_dj48m"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_main"]
 sky_top_color = Color(0.384314, 0.454902, 0.54902, 1)
@@ -33,3 +37,24 @@ base_speed = 4.0
 sprint_speed = 5.5
 jump_velocity = 4.6
 debug_enabled = true
+
+[node name="BlockRegistry" type="Node" parent="."]
+script = ExtResource("3_74rpx")
+metadata/_custom_type_script = "uid://dtpipcb0bq7hi"
+
+[node name="WorldManager" type="Node3D" parent="." node_paths=PackedStringArray("player", "world_generator")]
+script = ExtResource("3_j4c3e")
+player = NodePath("../ProtoController")
+world_generator = NodePath("WorldGenerator")
+metadata/_custom_type_script = "uid://ccb4n6nggp6j5"
+
+[node name="FluidManager" type="Node3D" parent="WorldManager" node_paths=PackedStringArray("world")]
+script = ExtResource("6_6pqbe")
+world = NodePath("../..")
+metadata/_custom_type_script = "uid://saejvypj6sh1"
+
+[node name="WorldGenerator" type="Node3D" parent="WorldManager"]
+script = ExtResource("7_dj48m")
+metadata/_custom_type_script = "uid://b3y2e5vvrivqu"
+
+[node name="TextureManager" type="Node3D" parent="."]

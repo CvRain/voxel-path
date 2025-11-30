@@ -196,14 +196,24 @@ func update_specific_sections(section_indices: Array) -> void:
 			_schedule_section_update_internal(section_idx, shared_snapshot, palette_map)
 
 func generate_mesh() -> void:
-	# OPTIMIZATION: Create ONE snapshot for all sections
-	# This prevents 16x memory usage explosion (16 sections * 4MB = 64MB per chunk!)
-	var shared_snapshot = voxels.duplicate()
-	var palette_map = palette._id_map.duplicate()
-	
-	# Generate all sections using the shared snapshot
-	for i in range(sections.size()):
-		_schedule_section_update_internal(i, shared_snapshot, palette_map)
+		print("[Chunk] generate_mesh called for:", name)
+		# 统计体素内容
+		var air_count = 0
+		var solid_count = 0
+		var unknown_count = 0
+		for i in range(voxels.size()):
+			var gid = palette.get_global_id(voxels[i])
+			if gid == Constants.AIR_BLOCK_ID:
+				air_count += 1
+			elif BlockRegistry.get_block(gid):
+				solid_count += 1
+			else:
+				unknown_count += 1
+		print("[Chunk] Voxel stats: air=%d, solid=%d, unknown=%d" % [air_count, solid_count, unknown_count])
+		var shared_snapshot = voxels.duplicate()
+		var palette_map = palette._id_map.duplicate()
+		for i in range(sections.size()):
+			_schedule_section_update_internal(i, shared_snapshot, palette_map)
 
 # --- Threaded Function ---
 # This runs on a background thread. CANNOT touch SceneTree nodes.
@@ -384,6 +394,7 @@ func _apply_mesh_update(section_idx: int, mesh_arrays: Array) -> void:
 		section_bodies[section_idx] = null
 
 	if mesh_arrays.size() > 0:
+		print("[Chunk] Section", section_idx, "mesh generated, arrays size:", mesh_arrays.size())
 		var arr_mesh = ArrayMesh.new()
 		arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays)
 		mesh_inst.mesh = arr_mesh
@@ -395,7 +406,7 @@ func _apply_mesh_update(section_idx: int, mesh_arrays: Array) -> void:
 			if child is StaticBody3D:
 				section_bodies[section_idx] = child
 	else:
-		mesh_inst.mesh = null
+		print("[Chunk] Section", section_idx, "mesh empty!")
 
 # Thread-safe visibility check
 func _thread_is_face_visible(_x: int, _y: int, _z: int, _local_voxels: PackedByteArray) -> bool:

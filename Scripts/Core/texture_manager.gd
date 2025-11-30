@@ -1,19 +1,9 @@
-# Scripts/Core/texture_manager.gd
-class_name TextureManager
-extends Node
+extends Node3D
 
-static var _instance: TextureManager
 var _atlas_texture: ImageTexture
 var _uv_cache: Dictionary = {} # path -> TextureUV
 var _pending_textures: Dictionary = {} # path -> Image
 var _texture_frame_counts: Dictionary = {} # path -> int (number of frames for strips)
-
-func _enter_tree() -> void:
-	if _instance != null:
-		queue_free()
-		return
-	_instance = self
-	set_process_mode(Node.PROCESS_MODE_ALWAYS)
 
 func register_texture(path: String) -> void:
 	if path in _pending_textures or path in _texture_frame_counts:
@@ -119,14 +109,6 @@ func get_texture_uv(path: String, frame: int = 0) -> TextureUV:
 
 func get_frame_count(path: String) -> int:
 	return _texture_frame_counts.get(path, 1)
-
-static func get_instance() -> TextureManager:
-	return _instance
-
-static func get_main_atlas() -> Texture2D:
-	if _instance:
-		return _instance._atlas_texture
-	return null
 
 func _next_power_of_2(v: int) -> int:
 	if v == 0: return 1

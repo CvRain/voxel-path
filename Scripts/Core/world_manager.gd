@@ -1,5 +1,5 @@
+extends Node3D
 class_name WorldManager
-extends Node
 
 # 引入区块生成阶段枚举
 const ChunkGenerationStage = preload("res://Scripts/Voxel/chunk_generation_stage.gd").ChunkGenerationStage
@@ -31,141 +31,198 @@ class ChunkData:
 @export var unload_distance: int = 16 # 卸载距离（区块）
 @export var max_loaded_chunks: int = 256 # 最大加载区块数
 
+@export var player: CharacterBody3D
+@export var world_generator: Node3D
+
+@onready var _fluid_manager: FluidManager = $FluidManager
+
+
 var _chunks: Dictionary = {} # Vector2i -> ChunkData
-var _player: Node3D = null
-var _world_generator: WorldGenerator = null
-var _fluid_manager: Node = null
 
 # 队列
 var _generation_queue: Array = [] # 待生成的区块位置
+var max_enqueue_per_frame: int = 8 # 每帧最多排队生成区块数
+var max_generation_queue_size: int = 64 # 生成队列最大长度
+var max_async_tasks: int = 4 # 最大并发异步生成任务数
+var _async_task_count: int = 0 # 当前异步生成任务数
 var _load_queue: Array = [] # 待加载的区块
 var _unload_queue: Array = [] # 待卸载的区块
 
 # 线程
 var _is_generating: bool = false # 是否有区块正在生成
 
-func _ready() -> void:
-	_initialize_world()
+# --- 分帧处理参数 ---
+var max_gen_per_frame: int = 2 # 每帧最多生成区块数
+var max_load_per_frame: int = 2 # 每帧最多加载区块数
+var max_unload_per_frame: int = 2 # 每帧最多卸载区块数
 
-func set_player(player: Node3D) -> void:
-	_player = player
+func _ready() -> void:
+	set_process_mode(Node.PROCESS_MODE_ALWAYS)
+	set_process(true)
+	print("[WorldManager] Ready")
+
+	_initialize_world()
+	_generate_initial_chunks()
+func _generate_initial_chunks() -> void:
+	# 检查stone方块是否注册成功
+	var stone_block = BlockRegistry.get_block_by_name("stone")
+	if stone_block:
+		print("[WorldManager] Stone block registered, id:", stone_block.id)
+	else:
+		print("[WorldManager] Stone block NOT FOUND!")
+	# 仅生成4x4区块，中心为(0,0)
+	var radius = 2
+	for x in range(-radius, radius):
+		for y in range(-radius, radius):
+			var pos = Vector2i(x, y)
+			if not _chunks.has(pos):
+				print("[WorldManager] Initial enqueuing generation for chunk:", pos)
+				_enqueue_generation(pos)
 
 func _initialize_world() -> void:
 	# Initialize World Generator
-	var WorldGeneratorScript = load("res://Scripts/Voxel/world_generator.gd")
-	_world_generator = WorldGeneratorScript.new(randi())
-	add_child(_world_generator)
-	
+	#var WorldGeneratorScript = load("res://Scripts/Voxel/world_generator.gd")
+	#_world_generator = WorldGeneratorScript.new(randi())
+	#add_child(_world_generator)
 	# Initialize Fluid Manager
-	var FluidManagerScript = load("res://Scripts/Voxel/fluid_manager.gd")
-	_fluid_manager = FluidManagerScript.new(self)
+	#var FluidManagerScript = load("res://Scripts/Voxel/fluid_manager.gd")
+	#_fluid_manager = FluidManagerScript.new(self)
+	pass
+	
 func _enqueue_load(pos: Vector2i) -> void:
 	if not _load_queue.has(pos):
 		_load_queue.append(pos)
 func _process(_delta: float) -> void:
-	if not _world_generator or not _player:
-		# _generation_thread = Thread.new() # Removed as it's no longer needed
+	if not world_generator or not player:
 		return
-	print("DEBUG: Player pos: %s, Chunk pos: %s" % [_player.global_position, _world_to_chunk_pos(_player.global_position)])
+	print("DEBUG: Player pos: %s, Chunk pos: %s" % [player.global_position, _world_to_chunk_pos(player.global_position)])
 	_update_chunks_around_player()
 	_process_queues()
+	# 主线程轮询WorldGenerator.pending_results，应用区块生成结果
+	world_generator.process_pending_results()
 
 func _update_chunks_around_player() -> void:
-	# 可在此处使用自定义logger
-	var player_chunk_pos = _world_to_chunk_pos(_player.global_position)
-	
-	# 计算需要加载的区块
+	var player_chunk_pos = _world_to_chunk_pos(player.global_position)
 	var chunks_to_load = _get_chunks_in_range(player_chunk_pos, render_distance)
 	print("DEBUG: Player chunk pos: %s, chunks to load: %d" % [player_chunk_pos, chunks_to_load.size()])
-	# 可在此处使用自定义logger
 
-	# 计算需要卸载的区块
 	var chunks_to_unload = []
 	for pos in _chunks.keys():
 		if pos.distance_to(player_chunk_pos) > unload_distance:
 			chunks_to_unload.append(pos)
-	
-	# 排队生成和加载
+
+	# 每帧补充新区块到生成队列（只要队列未满且区块未生成）
+	var enqueued_this_frame = 0
 	for pos in chunks_to_load:
-		if not _chunks.has(pos):
+		if not _chunks.has(pos) and not _generation_queue.has(pos) and enqueued_this_frame < max_enqueue_per_frame and _generation_queue.size() < max_generation_queue_size:
 			print("DEBUG: Enqueuing generation for chunk: %s" % pos)
 			_enqueue_generation(pos)
-		elif _chunks[pos].state == ChunkState.GENERATED:
-			# 可在此处使用自定义logger
+			enqueued_this_frame += 1
+		elif _chunks.has(pos) and _chunks[pos].state == ChunkState.GENERATED:
 			_enqueue_load(pos)
-	
-	# 排队卸载
+	print("[WorldManager] Generation queue size:", _generation_queue.size(), "Enqueued this frame:", enqueued_this_frame)
+
 	for pos in chunks_to_unload:
 		_enqueue_unload(pos)
-		# 可在此处使用自定义logger
 
 func _enqueue_generation(pos: Vector2i) -> void:
+	if _generation_queue.size() >= max_generation_queue_size:
+		print("[WorldManager] Generation queue full, drop chunk:", pos)
+		return
 	if not _generation_queue.has(pos):
 		_generation_queue.append(pos)
-	## 日志模块示例（WMLogger）
+		print("[WorldManager] Enqueued generation for chunk:", pos)
 
 
 func _enqueue_unload(pos: Vector2i) -> void:
 	if not _unload_queue.has(pos):
 		_unload_queue.append(pos)
 
+# --- 优先级队列排序（按距离玩家远近，兼容Godot 4） ---
+func _sort_queue_by_distance(queue: Array, center: Vector2i) -> Array:
+	var sorted = queue.duplicate()
+	sorted.sort_custom(func(a, b):
+		return a.distance_to(center) < b.distance_to(center)
+	)
+	return sorted
+
+# --- 反转数组（兼容Godot 4） ---
+func _reverse_array(arr: Array) -> Array:
+	var rev = arr.duplicate()
+	rev.reverse()
+	return rev
+
+# --- 优化后的 _process_queues ---
 func _process_queues() -> void:
-	# 处理生成队列（使用WorkerThreadPool）
-	if not _generation_queue.is_empty() and not _is_generating:
-		var pos = _generation_queue.pop_front()
-		# 可在此处使用自定义logger
-		_is_generating = true
-		WorkerThreadPool.add_task(_generate_chunk_thread.bind(pos), true, "ChunkGen %s" % pos)
-
-	# 处理加载队列（最大加载区块数限制）
+	var player_chunk_pos = _world_to_chunk_pos(player.global_position)
+	# 处理生成队列（优先最近区块，分帧）
+	if not _generation_queue.is_empty() and _async_task_count < max_async_tasks:
+		var sorted_gen = _sort_queue_by_distance(_generation_queue, player_chunk_pos)
+		print("[WorldManager] Generation queue:", sorted_gen)
+		var tasks_to_start = min(max_gen_per_frame, max_async_tasks - _async_task_count, sorted_gen.size())
+		for i in range(tasks_to_start):
+			var pos = sorted_gen[i]
+			_generation_queue.erase(pos)
+			_async_task_count += 1
+			print("[WorldManager] Start async generation for chunk:", pos)
+			world_generator.generate_chunk_stage_async(pos, ChunkGenerationStage.BASE_TERRAIN)
+			
+	# 处理加载队列（优先最近区块，分帧）
 	if not _load_queue.is_empty():
-		if _chunks.size() < max_loaded_chunks:
-			var pos = _load_queue.pop_front()
-			# 可在此处使用自定义logger
-			_load_chunk(pos)
-		else:
-			# 超限时优先卸载最远区块
-			var player_chunk_pos = _world_to_chunk_pos(_player.global_position)
-			var farthest_pos = null
-			var max_dist = -1
-			for cpos in _chunks.keys():
-				var dist = cpos.distance_to(player_chunk_pos)
-				if dist > max_dist:
-					max_dist = dist
-					farthest_pos = cpos
-			if farthest_pos:
-				# 可在此处使用自定义logger
-				_unload_chunk(farthest_pos)
-
-	# 处理卸载队列
+		var sorted_load = _sort_queue_by_distance(_load_queue, player_chunk_pos)
+		for i in range(min(max_load_per_frame, sorted_load.size())):
+			if _chunks.size() < max_loaded_chunks:
+				var pos = sorted_load[i]
+				_load_queue.erase(pos)
+				_load_chunk(pos)
+			else:
+				# 超限时优先卸载最远区块
+				var farthest_pos = null
+				var max_dist = -1
+				for cpos in _chunks.keys():
+					var dist = cpos.distance_to(player_chunk_pos)
+					if dist > max_dist:
+						max_dist = dist
+						farthest_pos = cpos
+				if farthest_pos:
+					_unload_chunk(farthest_pos)
+	# 处理卸载队列（优先最远区块，分帧）
 	if not _unload_queue.is_empty():
-		var pos = _unload_queue.pop_front()
-		# 可在此处使用自定义logger
-		_unload_chunk(pos)
+		var sorted_unload = _reverse_array(_sort_queue_by_distance(_unload_queue, player_chunk_pos))
+		for i in range(min(max_unload_per_frame, sorted_unload.size())):
+			var pos = sorted_unload[i]
+			_unload_queue.erase(pos)
+			_unload_chunk(pos)
 
-func _generate_chunk_thread(pos: Vector2i) -> Chunk:
-	# WorkerThreadPool任务，线程安全生成区块
-	var chunk = Chunk.new(pos)
-	# 分阶段生成
-	_world_generator.generate_chunk_stage(chunk, ChunkGenerationStage.BASE_TERRAIN)
-	_world_generator.generate_chunk_stage(chunk, ChunkGenerationStage.WATER_AND_SURFACE)
-	_world_generator.generate_chunk_stage(chunk, ChunkGenerationStage.ORES_AND_CAVES)
-	_world_generator.generate_chunk_stage(chunk, ChunkGenerationStage.DECORATIONS)
-	_world_generator.generate_chunk_stage(chunk, ChunkGenerationStage.FULLY_GENERATED)
-	# 主线程回调
-	call_deferred("_on_generation_completed", pos, chunk)
-	return chunk
 
-func _on_generation_completed(pos: Vector2i, chunk: Chunk) -> void:
-	_is_generating = false
-	_chunks[pos].chunk = chunk
-	_chunks[pos].state = ChunkState.GENERATED
-	# 自动排队加载
-	_enqueue_load(pos)
+# 新增：主线程应用异步生成结果，分配Chunk对象并批量写入体素数据
+func apply_chunk_stage_result(chunk_pos: Vector2i, stage: int, result: Dictionary) -> void:
+	print("[WorldManager] Generation completed for chunk:", chunk_pos)
+	if _async_task_count > 0:
+		_async_task_count -= 1
+	# 主线程唯一分配Chunk对象
+	if not _chunks.has(chunk_pos):
+		_chunks[chunk_pos] = ChunkData.new(chunk_pos)
+	var chunk = Chunk.new(chunk_pos)
+	# 仅支持一维PackedInt32Array高效写入
+	if result.has("buffer") and result["buffer"] != null:
+		var buffer = result["buffer"]
+		var size = Constants.CHUNK_SIZE
+		for i in range(buffer.size()):
+			var x = i % size
+			var y = int(i / (size * size))
+			var z = int((i / size) % size)
+			chunk.set_voxel_raw(x, y, z, buffer[i])
+	_chunks[chunk_pos].chunk = chunk
+	_chunks[chunk_pos].state = ChunkState.GENERATED
+	print("[WorldManager] Enqueue load for chunk:", chunk_pos)
+	_enqueue_load(chunk_pos)
 
 func _load_chunk(pos: Vector2i) -> void:
+	print("[WorldManager] Loading chunk:", pos)
 	var chunk_data = _chunks[pos]
 	if chunk_data.state != ChunkState.GENERATED:
+		print("[WorldManager] Chunk not in GENERATED state, skip load:", pos)
 		return
 
 	var chunk = chunk_data.chunk
@@ -173,10 +230,13 @@ func _load_chunk(pos: Vector2i) -> void:
 	chunk.position = Vector3(pos.x * Constants.CHUNK_SIZE * Constants.VOXEL_SIZE, 0, pos.y * Constants.CHUNK_SIZE * Constants.VOXEL_SIZE)
 	add_child(chunk)
 
-	# 生成区块网格
-	chunk.generate_mesh()
+	# 生成区块网格（确保BlockRegistry已初始化）
+	if BlockRegistry.get_instance():
+		print("[WorldManager] Generating mesh for chunk:", pos)
+		chunk.generate_mesh()
+	else:
+		print("[ERROR] BlockRegistry未初始化，区块内容为空！")
 
-	# 只保留Chunk类中的碰撞体积，移除WorldManager中的重复碰撞体积创建
 	chunk_data.area = chunk.area
 	chunk_data.state = ChunkState.LOADED
 	chunk_data.last_accessed = Time.get_ticks_msec()
@@ -197,7 +257,7 @@ func _unload_chunk(pos: Vector2i) -> void:
 	_chunks.erase(pos)
 
 func _on_chunk_entered(body: Node3D, pos: Vector2i) -> void:
-	if body == _player:
+	if body == player:
 		_chunks[pos].last_accessed = Time.get_ticks_msec()
 
 func _world_to_chunk_pos(world_pos: Vector3) -> Vector2i:
@@ -246,7 +306,12 @@ func _world_to_local_pos(world_pos: Vector3i, chunk_pos: Vector2i) -> Vector3i:
 # 支持动态调整视距，自动刷新区块加载/卸载
 func set_render_distance(new_distance: int) -> void:
 	render_distance = new_distance
-	if _player:
+	if player:
 		_update_chunks_around_player()
 		_process_queues()
 	# 可扩展：保存配置、触发信号等
+
+# --- 资源回收与异常处理建议 ---
+# 1. 所有queue_free操作前判断对象是否有效
+# 2. 所有异步任务建议try/catch，主线程回调时检测结果有效性
+# 3. 可在主线程定期调用WorldGenerator.process_pending_results()

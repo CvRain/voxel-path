@@ -12,9 +12,7 @@ func _initialize_systems() -> void:
 	var block_registry = BlockRegistry.new()
 	add_child(block_registry)
 	
-	var block_manager = BlockManager.new()
-	block_manager.loading_complete.connect(_on_loading_complete)
-	add_child(block_manager)
+	BlockManager.loading_complete.connect(_on_loading_complete)
 
 func _on_loading_complete() -> void:
 	print("Generating test blocks...")

@@ -1,12 +1,11 @@
+extends Node3D
 class_name WorldGenerator
-extends Node
 
 # --- 异步worker结果队列，主线程轮询处理 ---
 var pending_results: Array = []
 
-# 异步worker任务接口
-func generate_chunk_stage_async(chunk: Chunk, stage: int) -> void:
-	var chunk_pos = chunk.chunk_position
+# 异步worker任务接口（只生成体素原始数据，不操作Chunk对象）
+func generate_chunk_stage_async(chunk_pos: Vector2i, stage: int) -> void:
 	var params = {}
 	var task_func = func():
 		var res = {}
@@ -19,12 +18,11 @@ func generate_chunk_stage_async(chunk: Chunk, stage: int) -> void:
 				res = _generate_ores_and_caves_worker(chunk_pos, params)
 			ChunkGenerationStage.DECORATIONS:
 				res = _generate_decorations_worker(chunk_pos, params)
-		# 返回结果和区块信息
+		# 返回结果和区块信息（不包含Chunk对象引用）
 		return {
 			"chunk_pos": chunk_pos,
 			"stage": stage,
-			"result": res,
-			"chunk_ref": chunk # 可选，主线程可用
+			"result": res
 		}
 	WorkerThreadPool.add_task(
 		task_func,
@@ -32,43 +30,78 @@ func generate_chunk_stage_async(chunk: Chunk, stage: int) -> void:
 		"ChunkGenAsync %s stage=%d" % [str(chunk_pos), stage]
 	)
 
-# 主线程每帧轮询pending_results，应用结果
+# 主线程每帧轮询pending_results，应用结果（主线程分配Chunk对象并apply体素数据）
 func process_pending_results() -> void:
-	for data in pending_results:
-		var chunk = data.get("chunk_ref")
-		var stage = data.get("stage")
-		var result = data.get("result")
-		# TODO: 按stage应用结果到chunk，可自定义回调
-		# 例如：chunk.apply_stage_result(stage, result)
+	# 自动调用WorldManager.apply_chunk_stage_result，实现主线程批量应用体素数据
+	var wm = get_parent() # WorldManager应为WorldGenerator的父节点
+	if wm and wm.has_method("apply_chunk_stage_result"):
+		for data in pending_results:
+			var chunk_pos = data.get("chunk_pos")
+			var stage = data.get("stage")
+			var result = data.get("result")
+			wm.apply_chunk_stage_result(chunk_pos, stage, result)
 	pending_results.clear()
 
-# 各阶段worker实现（返回结果数据，主线程应用）
+
+# 各阶段worker实现（只返回体素原始数据，主线程apply）
 
 # 异步worker实现：基础地形
-func _generate_base_terrain_worker(_chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
+func _generate_base_terrain_worker(chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
 	var result = {}
-	# ...生成地形数据...
+	var stone_block = BlockRegistry.get_block_by_name("stone")
+	var chunk_size = Constants.CHUNK_SIZE
+	var buffer = PackedInt32Array()
+	if stone_block:
+		for y in range(chunk_size):
+			for z in range(chunk_size):
+				for x in range(chunk_size):
+					if y < 8:
+						buffer.append(stone_block.id)
+					else:
+						buffer.append(0) # air
+	result["buffer"] = buffer
 	return result
 
 
 # 异步worker实现：水体与表层
-func _generate_water_and_surface_worker(_chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
+func _generate_water_and_surface_worker(chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
 	var result = {}
-	# ...生成水体与表层数据...
+	var chunk_size = Constants.CHUNK_SIZE
+	var buffer = PackedInt32Array()
+	# 示例：全部填充air，可扩展为水体/表层生成
+	for y in range(chunk_size):
+		for z in range(chunk_size):
+			for x in range(chunk_size):
+				buffer.append(0)
+	result["buffer"] = buffer
 	return result
 
 
 # 异步worker实现：矿脉与洞穴
-func _generate_ores_and_caves_worker(_chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
+func _generate_ores_and_caves_worker(chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
 	var result = {}
-	# ...生成矿脉与洞穴数据...
+	var chunk_size = Constants.CHUNK_SIZE
+	var buffer = PackedInt32Array()
+	# 示例：全部填充air，可扩展为矿脉/洞穴生成
+	for y in range(chunk_size):
+		for z in range(chunk_size):
+			for x in range(chunk_size):
+				buffer.append(0)
+	result["buffer"] = buffer
 	return result
 
 
 # 异步worker实现：装饰物
-func _generate_decorations_worker(_chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
+func _generate_decorations_worker(chunk_pos: Vector2i, _params: Dictionary) -> Dictionary:
 	var result = {}
-	# ...生成装饰物数据...
+	var chunk_size = Constants.CHUNK_SIZE
+	var buffer = PackedInt32Array()
+	# 示例：全部填充air，可扩展为装饰物生成
+	for y in range(chunk_size):
+		for z in range(chunk_size):
+			for x in range(chunk_size):
+				buffer.append(0)
+	result["buffer"] = buffer
 	return result
 
 
@@ -94,7 +127,7 @@ var _id_leaves: int = 0
 # Ore IDs
 var _ore_ids: Dictionary = {}
 
-func _init(seed_val: int) -> void:
+func _init(seed_val: int = 0) -> void:
 	_seed = seed_val
 	_initialize_noise()
 	_initialize_biomes()
@@ -227,7 +260,14 @@ func cache_block_ids() -> void:
 	var water = BlockRegistry.get_block_by_name("water")
 	var oak_log = BlockRegistry.get_block_by_name("oak_log")
 	var leaves = BlockRegistry.get_block_by_name("oak_leaves")
-	
+
+	print("[WorldGen] Block IDs:",
+		"bedrock:", bedrock.id if bedrock else "None",
+		"stone:", stone.id if stone else "None",
+		"dirt:", dirt.id if dirt else "None",
+		"grass:", grass.id if grass else "None",
+		"water:", water.id if water else "None")
+
 	if bedrock: _id_bedrock = bedrock.id
 	if stone: _id_stone = stone.id
 	if dirt: _id_dirt = dirt.id
@@ -235,7 +275,7 @@ func cache_block_ids() -> void:
 	if water: _id_water = water.id
 	if oak_log: _id_log = oak_log.id
 	if leaves: _id_leaves = leaves.id
-	
+
 	# Cache biome blocks
 	for biome in _biomes:
 		biome.cache_ids()
@@ -263,9 +303,8 @@ func generate_chunk_stage(chunk: Chunk, stage: int) -> void:
 func _generate_base_terrain(chunk: Chunk) -> void:
 	var cx_offset = chunk.chunk_position.x * Constants.CHUNK_SIZE
 	var cz_offset = chunk.chunk_position.y * Constants.CHUNK_SIZE
-	
 	var step = 2 # Voxel scale optimization
-	
+	var non_air_count = 0
 	for x in range(0, Constants.CHUNK_SIZE, step):
 		for z in range(0, Constants.CHUNK_SIZE, step):
 			var world_x = cx_offset + x
@@ -308,7 +347,13 @@ func _generate_base_terrain(chunk: Chunk) -> void:
 					if vx >= Constants.CHUNK_SIZE or vz >= Constants.CHUNK_SIZE:
 						continue
 						
+					# 统计写入非空气方块
+					var _before = chunk.get_voxel(vx, 0, vz)
 					_fill_base_column(chunk, vx, vz, height)
+					var after = chunk.get_voxel(vx, 0, vz)
+					if after != Constants.AIR_BLOCK_ID:
+						non_air_count += 1
+	print("[WorldGen] Base terrain non-air count:", non_air_count, "for chunk", chunk.name)
 
 # 填充基础列（基岩和石头）
 func _fill_base_column(chunk: Chunk, x: int, z: int, height: int) -> void:

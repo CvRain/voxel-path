@@ -1,11 +1,10 @@
+extends Node3D
 class_name FluidManager
-extends Node
 
-var _world: Node
+@export var world: Node3D
 var _rng: RandomNumberGenerator
 
-func _init(world_node: Node) -> void:
-	_world = world_node
+func _init() -> void:
 	_rng = RandomNumberGenerator.new()
 
 func is_infinite_source(pos: Vector3i, block_data: FluidBlockData) -> bool:
@@ -37,7 +36,7 @@ func is_infinite_source(pos: Vector3i, block_data: FluidBlockData) -> bool:
 			if visited.has(n): continue
 			
 			# We use get_voxel_at from world, which handles chunk lookups
-			if _world.get_voxel_at(n) == target_id:
+			if world.get_voxel_at(n) == target_id:
 				visited[n] = true
 				queue.append(n)
 				

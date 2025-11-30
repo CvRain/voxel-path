@@ -18,6 +18,9 @@ config/icon="uid://271lp7bh2he2"
 [autoload]
 
 GlobalLogger="*res://Scripts/Core/logger.gd"
+BlockManager="*res://Scripts/Voxel/block_manager.gd"
+TextureManager="*res://Scripts/Core/texture_manager.gd"
+BlockRegistry="*res://Scripts/Voxel/block_registry.gd"
 
 [dotnet]
 

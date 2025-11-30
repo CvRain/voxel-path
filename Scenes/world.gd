@@ -24,9 +24,7 @@ func _initialize_systems() -> void:
 	
 	await get_tree().process_frame
 	
-	var block_manager = BlockManager.new()
-	add_child(block_manager)
-	block_manager.loading_complete.connect(_on_block_loading_complete)
+	BlockManager.loading_complete.connect(_on_block_loading_complete)
 	MyLogger.debug("BlockManager initialized")
 
 func _on_block_loading_complete() -> void:

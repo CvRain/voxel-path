@@ -1,12 +1,7 @@
 # Scripts/Voxel/block_manager.gd
-class_name BlockManager
-extends Node
-
-static var _instance: BlockManager
+extends Node3D
 
 var _config_loader: ConfigLoader
-var _texture_manager: TextureManager
-var _block_registry: BlockRegistry
 
 var _loaded_categories: Dictionary = {}
 var _manifest: Dictionary = {}
@@ -16,24 +11,15 @@ signal loading_started
 signal loading_progress(current: int, total: int)
 signal loading_complete
 
-func _enter_tree() -> void:
-	if _instance != null:
-		queue_free()
-		return
-	_instance = self
-	set_process_mode(Node.PROCESS_MODE_ALWAYS)
-
 func _ready() -> void:
 	_config_loader = ConfigLoader.new()
 	add_child(_config_loader)
 	
-	_texture_manager = TextureManager.get_instance()
-	if _texture_manager == null:
+	if TextureManager == null:
 		MyLogger.error("TextureManager not found")
 		return
 	
-	_block_registry = BlockRegistry.get_instance()
-	if _block_registry == null:
+	if BlockRegistry == null:
 		MyLogger.error("BlockRegistry not found")
 		return
 	
@@ -52,26 +38,46 @@ func load_all_blocks() -> void:
 	if _manifest.is_empty():
 		MyLogger.error("Failed to load manifest")
 		return
-	
+
 	var categories = _manifest.get("categories", [])
 	categories.sort_custom(func(a, b): return a.get("priority", 0) < b.get("priority", 0))
-	
+
 	var total = categories.size()
 	var current = 0
-	
+
 	for category_info in categories:
 		if not category_info.get("enabled", true):
 			MyLogger.info("Skipping disabled category: %s" % category_info.get("path"))
 			current += 1
 			continue
-		
+
 		load_category(category_info)
 		current += 1
 		loading_progress.emit(current, total)
-	
-	_texture_manager.build_atlas()
+
+	# 检查基础方块是否全部注册
+	var required_blocks = ["air", "bedrock", "stone", "dirt", "grass", "water"]
+	var missing_blocks = []
+	for block_name in required_blocks:
+		if not BlockRegistry.get_block_by_name(block_name):
+			missing_blocks.append(block_name)
+	if missing_blocks.size() > 0:
+		MyLogger.warn("[BlockManager] Manifest missing required blocks: %s" % str(missing_blocks))
+		# 可选：自动补全air方块
+		if "air" in missing_blocks:
+			var BlockDataScript = load("res://Scripts/Voxel/block_data.gd")
+			var air_block = BlockDataScript.new()
+			air_block.name = "air"
+			air_block.display_name = "Air"
+			air_block.is_transparent = true
+			air_block.is_solid = false
+			air_block.has_collision = false
+			BlockRegistry.register_block(air_block)
+			MyLogger.success("[BlockManager] Auto-registered missing 'air' block.")
+
+	TextureManager.build_atlas()
 	_resolve_all_block_uvs()
-	
+
 	_loading_complete = true
 	MyLogger.success("Block loading complete. Total blocks: %d" % BlockRegistry.get_block_count())
 	loading_complete.emit()
@@ -97,7 +103,7 @@ func load_category(category_info: Dictionary) -> void:
 	_loaded_categories[category_name] = category_config
 	MyLogger.debug("Category loaded: %s" % category_name)
 
-func _load_category_textures(category_config: Dictionary) -> void:
+func _load_category_textures(_category_config: Dictionary) -> void:
 	pass # Deprecated: Textures are loaded from block files directly
 
 func _load_category_blocks(category_path: String, category_config: Dictionary) -> void:
@@ -178,14 +184,14 @@ func _load_block_textures(block: BlockData, block_config: Dictionary) -> void:
 	if "all" in textures_config:
 		var path = textures_config["all"]
 		block.texture_paths["all"] = path
-		_texture_manager.register_texture(path)
+		TextureManager.register_texture(path)
 		
 	# Handle specific faces
 	for face in ["top", "bottom", "left", "right", "front", "back", "side"]:
 		if face in textures_config:
 			var path = textures_config[face]
 			block.texture_paths[face] = path
-			_texture_manager.register_texture(path)
+			TextureManager.register_texture(path)
 
 func _resolve_all_block_uvs() -> void:
 	var block_ids = BlockRegistry.get_all_block_ids()
@@ -196,11 +202,11 @@ func _resolve_all_block_uvs() -> void:
 		# Handle "all"
 		if "all" in block.texture_paths:
 			var path = block.texture_paths["all"]
-			var frames = _texture_manager.get_frame_count(path)
+			var frames = TextureManager.get_frame_count(path)
 			block.random_texture_frames = max(block.random_texture_frames, frames)
 			
 			for i in range(frames):
-				var uv = _texture_manager.get_texture_uv(path, i)
+				var uv = TextureManager.get_texture_uv(path, i)
 				if uv:
 					var key = "diffuse"
 					if i > 0: key += "#%d" % i
@@ -215,33 +221,14 @@ func _resolve_all_block_uvs() -> void:
 				path = block.texture_paths["side"]
 			
 			if path:
-				var frames = _texture_manager.get_frame_count(path)
+				var frames = TextureManager.get_frame_count(path)
 				# Note: If different faces have different frame counts, this might be tricky.
 				# We assume if one face is animated/random, all are, or we take the max.
 				block.random_texture_frames = max(block.random_texture_frames, frames)
 				
 				for i in range(frames):
-					var uv = _texture_manager.get_texture_uv(path, i)
+					var uv = TextureManager.get_texture_uv(path, i)
 					if uv:
 						var key = "%s_diffuse" % face
 						if i > 0: key += "#%d" % i
 						block.textures[key] = uv
-
-static func get_loaded_categories() -> Dictionary:
-	return _instance._loaded_categories.duplicate() if _instance else {}
-
-static func is_loading_complete() -> bool:
-	return _instance != null and _instance._loading_complete
-
-static func debug_print_categories() -> void:
-	if _instance == null:
-		return
-	
-	print("=== Loaded Categories ===")
-	for cat_name in _instance._loaded_categories:
-		var config = _instance._loaded_categories[cat_name]
-		var blocks_count = config.get("blocks", []).size()
-		print("  [%s] %s - %d blocks" % [cat_name, config.get("display_name"), blocks_count])
-
-static func get_instance() -> BlockManager:
-	return _instance

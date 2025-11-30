@@ -1,6 +1,7 @@
 class_name WorldGenerator
 extends Node
 
+
 # 引入区块生成阶段枚举
 const ChunkGenerationStage = preload("res://Scripts/Voxel/chunk_generation_stage.gd").ChunkGenerationStage
 
@@ -264,6 +265,34 @@ class SectionGenerationTask:
 		stage = s
 		generator = gen
 
+func _get_cached_height(world_x: int, world_z: int) -> int:
+	var key = Vector2i(world_x, world_z)
+	if _height_cache.has(key):
+		return _height_cache[key]
+	# 计算高度（大陆+侵蚀）
+	var continental_val = _continental_noise.get_noise_2d(world_x, world_z)
+	var erosion_val = _erosion_noise.get_noise_2d(world_x, world_z)
+	var base_height = 64.0
+	var height_scale = 0.0
+	if continental_val < -0.2:
+		base_height = 40.0
+		height_scale = 20.0
+	elif continental_val < 0.0:
+		base_height = 64.0
+		height_scale = 5.0
+	elif continental_val < 0.5:
+		base_height = 70.0
+		height_scale = 30.0
+	else:
+		base_height = 100.0
+		height_scale = 120.0
+	var final_height = int(base_height + (continental_val * 10.0) + (erosion_val * height_scale))
+	final_height = clamp(final_height, 0, Constants.VOXEL_MAX_HEIGHT - 1)
+	_height_cache[key] = final_height
+	if _height_cache.size() > 10000:
+		_height_cache.clear()
+	return final_height
+
 # 生成Section的基础地形
 func _generate_section_base_terrain(chunk: Chunk, section_index: int) -> void:
 	var bounds = chunk.get_section_bounds(section_index)
@@ -352,47 +381,42 @@ func _generate_section_ores_and_caves(chunk: Chunk, section_index: int) -> void:
 
 # 生成Section的矿石
 func _generate_section_ores(chunk: Chunk, section_index: int) -> void:
-	var bounds = chunk.get_section_bounds(section_index)
-	var min_pos = bounds.min
-	var max_pos = bounds.max
-	
-	# 配置矿石生成参数: [OreName, Attempts, MinY, MaxY, Size]
-	var ore_configs = [
-		["coal_ore", 3, 10, 128, 8],
-		["iron_ore", 2, 5, 64, 6],
-		["copper_ore", 2, 30, 90, 8],
-		["tin_ore", 1, 20, 80, 6],
-		["aluminum_ore", 1, 40, 100, 6],
-		["zinc_ore", 1, 20, 70, 6],
-		["gold_ore", 1, 0, 32, 4],
-		["silver_ore", 1, 5, 40, 5],
-		["lapis_ore", 1, 0, 30, 4],
-		["diamond_ore", 1, 0, 16, 4],
-		["emerald_ore", 1, 0, 32, 3]
-	]
-	
-	var rng = RandomNumberGenerator.new()
-	rng.seed = hash(chunk.chunk_position) + section_index + 12345
-	
-	for config in ore_configs:
-		var ore_name = config[0]
-		if not _ore_ids.has(ore_name): continue
-		
-		var block_id = _ore_ids[ore_name]
-		var attempts = config[1]
-		var min_y = max(config[2], min_pos.y)
-		var max_y = min(config[3], max_pos.y)
-		var size = config[4]
-		
-		# 只在Y范围内的Section生成矿石
-		if min_y <= max_y:
-			for i in range(attempts):
-				var x = rng.randi_range(min_pos.x, max_pos.x)
-				var z = rng.randi_range(min_pos.z, max_pos.z)
-				var y = rng.randi_range(min_y, max_y)
-				
-				_generate_vein_in_section(chunk, x, y, z, block_id, size, rng, min_pos, max_pos)
-
+	pass
+		# [矿物生成已临时关闭，待后续优化后再启用]
+	# var bounds = chunk.get_section_bounds(section_index)
+	# var min_pos = bounds.min
+	# var max_pos = bounds.max
+	# # 配置矿石生成参数: [OreName, Attempts, MinY, MaxY, Size]
+	# var ore_configs = [
+	# 	["coal_ore", 3, 10, Constants.SEA_LEVEL, 8],
+	# 	["iron_ore", 2, 5, Constants.SEA_LEVEL - 32, 6],
+	# 	["copper_ore", 2, 30, Constants.SEA_LEVEL - 16, 8],
+	# 	["tin_ore", 1, 20, Constants.SEA_LEVEL - 16, 6],
+	# 	["aluminum_ore", 1, 40, Constants.SEA_LEVEL - 8, 6],
+	# 	["zinc_ore", 1, 20, Constants.SEA_LEVEL - 8, 6],
+	# 	["gold_ore", 1, 0, Constants.SEA_LEVEL - 64, 4],
+	# 	["silver_ore", 1, 5, Constants.SEA_LEVEL - 32, 5],
+	# 	["lapis_ore", 1, 0, Constants.SEA_LEVEL - 96, 4],
+	# 	["diamond_ore", 1, 0, Constants.SEA_LEVEL - 128, 4],
+	# 	["emerald_ore", 1, 0, Constants.SEA_LEVEL - 96, 3]
+	# ]
+	# var rng = RandomNumberGenerator.new()
+	# rng.seed = hash(chunk.chunk_position) + section_index + 12345
+	# for config in ore_configs:
+	# 	var ore_name = config[0]
+	# 	if not _ore_ids.has(ore_name): continue
+	# 	var block_id = _ore_ids[ore_name]
+	# 	var attempts = config[1]
+	# 	var min_y = max(config[2], min_pos.y)
+	# 	var max_y = min(config[3], max_pos.y)
+	# 	var size = config[4]
+	# 	# 只在Y范围内的Section生成矿石
+	# 	if min_y <= max_y:
+	# 		for i in range(attempts):
+	# 			var x = rng.randi_range(min_pos.x, max_pos.x)
+	# 			var z = rng.randi_range(min_pos.z, max_pos.z)
+	# 			var y = rng.randi_range(min_y, max_y)
+	# 			_generate_vein_in_section(chunk, x, y, z, block_id, size, rng, min_pos, max_pos)
 func _generate_vein_in_section(chunk: Chunk, start_x: int, start_y: int, start_z: int, block_id: int, size: int, rng: RandomNumberGenerator, min_pos: Vector3i, max_pos: Vector3i) -> void:
 	var current_x = start_x
 	var current_y = start_y
@@ -414,7 +438,7 @@ func _generate_vein_in_section(chunk: Chunk, start_x: int, start_y: int, start_z
 		current_z += rng.randi_range(-1, 1)
 
 # 生成Section的装饰物
-func _generate_section_decorations(chunk: Chunk, section_index: int) -> void:
+func _generate_section_decorations(_chunk: Chunk, _section_index: int) -> void:
 	# 装饰物（如树木）通常跨越多个Section，这里我们只处理部分情况
 	# 简化处理：只在地表Section生成装饰物
 	pass
@@ -594,58 +618,11 @@ func _fill_column(chunk: Chunk, x: int, z: int, height: int, sea_level: int, bio
 			chunk.set_voxel_raw(x, y, z, _id_water)
 
 func _generate_ores(chunk: Chunk) -> void:
-	# Config: [OreName, Attempts, MinY, MaxY, Size]
-	var ore_configs = [
-		["coal_ore", 20, 10, 128, 8],
-		["iron_ore", 15, 5, 64, 6],
-		["copper_ore", 15, 30, 90, 8],
-		["tin_ore", 12, 20, 80, 6],
-		["aluminum_ore", 10, 40, 100, 6],
-		["zinc_ore", 10, 20, 70, 6],
-		["gold_ore", 5, 0, 32, 4],
-		["silver_ore", 6, 5, 40, 5],
-		["lapis_ore", 4, 0, 30, 4],
-		["diamond_ore", 2, 0, 16, 4],
-		["emerald_ore", 2, 0, 32, 3] # Usually mountain only
-	]
-	
-	var rng = RandomNumberGenerator.new()
-	rng.seed = hash(chunk.chunk_position) + 12345
-	
-	for config in ore_configs:
-		var ore_name = config[0]
-		if not _ore_ids.has(ore_name): continue
-		
-		var block_id = _ore_ids[ore_name]
-		var attempts = config[1]
-		var min_y = config[2]
-		var max_y = config[3]
-		var size = config[4]
-		
-		for i in range(attempts):
-			var x = rng.randi_range(0, Constants.CHUNK_SIZE - 1)
-			var z = rng.randi_range(0, Constants.CHUNK_SIZE - 1)
-			var y = rng.randi_range(min_y, max_y)
-			
-			_generate_vein(chunk, x, y, z, block_id, size, rng)
+	# [矿物生成已临时关闭，待后续优化后再启用]
+	return
 
 func _generate_vein(chunk: Chunk, start_x: int, start_y: int, start_z: int, block_id: int, size: int, rng: RandomNumberGenerator) -> void:
-	var current_x = start_x
-	var current_y = start_y
-	var current_z = start_z
-	
-	for i in range(size):
-		if chunk.is_valid_position(current_x, current_y, current_z):
-			# Only replace stone
-			# Note: We need to check against all biome stone types ideally, but for now just check if it's not air/water/bedrock
-			var current_id = chunk.get_voxel(current_x, current_y, current_z)
-			if current_id != Constants.AIR_BLOCK_ID and current_id != _id_bedrock and current_id != _id_water:
-				# Ideally check if it is "stone" material
-				chunk.set_voxel_raw(current_x, current_y, current_z, block_id)
-		
-		current_x += rng.randi_range(-1, 1)
-		current_y += rng.randi_range(-1, 1)
-		current_z += rng.randi_range(-1, 1)
+	return
 
 func decorate_chunk(chunk: Chunk, world_seed: int) -> void:
 	var cx_offset = chunk.chunk_position.x * Constants.CHUNK_SIZE
@@ -676,68 +653,7 @@ func _get_surface_height(chunk: Chunk, x: int, z: int, biome: Resource) -> int:
 	return -1
 
 func _generate_tree(chunk: Chunk, x: int, y: int, z: int, rng: RandomNumberGenerator) -> void:
-	var height = 4 + rng.randi() % 3
-	
-	# Trunk
-	for i in range(height):
-		if chunk.is_valid_position(x, y + i, z):
-			chunk.set_voxel_raw(x, y + i, z, _id_log)
-			
-	# Leaves
-	var leaf_start_y = y + height - 2
-	var leaf_end_y = y + height + 1
-	
-	for ly in range(leaf_start_y, leaf_end_y + 1):
-		var radius = 2
-		if ly == leaf_end_y: radius = 1
-		
-		for lx in range(x - radius, x + radius + 1):
-			for lz in range(z - radius, z + radius + 1):
-				if abs(lx - x) == radius and abs(lz - z) == radius:
-					continue
-				
-				if chunk.is_valid_position(lx, ly, lz):
-					if chunk.get_voxel(lx, ly, lz) == Constants.AIR_BLOCK_ID:
-						chunk.set_voxel_raw(lx, ly, lz, _id_leaves)
-
-func _get_cached_height(world_x: int, world_z: int) -> int:
-	var key = Vector2i(world_x, world_z)
-	if _height_cache.has(key):
-		return _height_cache[key]
-	
-	# 1. Calculate Height (Continental + Erosion)
-	var continental_val = _continental_noise.get_noise_2d(world_x, world_z)
-	var erosion_val = _erosion_noise.get_noise_2d(world_x, world_z)
-	
-	# Map continental noise to base height zones
-	var base_height = 64.0
-	var height_scale = 0.0
-	
-	if continental_val < -0.2: # Ocean
-		base_height = 40.0
-		height_scale = 20.0
-	elif continental_val < 0.0: # Coast/Beach
-		base_height = 64.0
-		height_scale = 5.0
-	elif continental_val < 0.5: # Inland/Plains
-		base_height = 70.0
-		height_scale = 30.0
-	else: # Mountains
-		base_height = 100.0
-		height_scale = 120.0
-		
-	# Apply erosion/detail
-	var final_height = int(base_height + (continental_val * 10.0) + (erosion_val * height_scale))
-	final_height = clamp(final_height, 0, Constants.VOXEL_MAX_HEIGHT - 1)
-	
-	# 缓存结果
-	_height_cache[key] = final_height
-	
-	# 限制缓存大小以避免内存问题
-	if _height_cache.size() > 10000:
-		_height_cache.clear()
-	
-	return final_height
+	pass
 
 func _get_cached_biome(world_x: int, world_z: int) -> Resource:
 	var key = Vector2i(world_x, world_z)
@@ -923,13 +839,42 @@ func _thread_generate_section(snap: Dictionary, chunk_ref: Chunk) -> void:
 						out.push_back(y)
 						out.push_back(z)
 						out.push_back(snap.id_water)
+
 			elif stage == ChunkGenerationStage.ORES_AND_CAVES:
-				# simplified ores: place a few veins deterministically per section
+				# worker端简易矿石生成（每section生成少量矿石）
 				var rng = RandomNumberGenerator.new()
 				var s_section = snap.section_index
 				rng.seed = int(hash(Vector2i(cx, cz).x) + s_section + 12345)
-				# For simplicity, skip heavy ore generation in worker for now
-				pass
+				var ore_ids = snap.ore_ids
+				var min_y = min_pos.y
+				var max_y = max_pos.y
+				var ore_types = ["coal_ore", "iron_ore", "copper_ore", "tin_ore", "gold_ore"]
+				for ore_name in ore_types:
+					if not ore_ids.has(ore_name): continue
+					var block_id = ore_ids[ore_name]
+					for i in range(2):
+						var ox = rng.randi_range(min_pos.x, max_pos.x)
+						var oy = rng.randi_range(min_y, max_y)
+						var oz = rng.randi_range(min_pos.z, max_pos.z)
+						out.push_back(ox)
+						out.push_back(oy)
+						out.push_back(oz)
+						out.push_back(block_id)
+
+			elif stage == ChunkGenerationStage.DECORATIONS:
+				# worker端简易装饰生成（如树木，仅在地表附近生成）
+				var rng = RandomNumberGenerator.new()
+				rng.seed = int(hash(Vector2i(cx, cz).x) + snap.section_index + 54321)
+				var max_y = max_pos.y
+				# 仅在section顶部生成少量树木
+				for i in range(1):
+					var tx = rng.randi_range(min_pos.x, max_pos.x)
+					var tz = rng.randi_range(min_pos.z, max_pos.z)
+					var ty = max_y
+					out.push_back(tx)
+					out.push_back(ty)
+					out.push_back(tz)
+					out.push_back(snap.id_log)
 
 	# Dispatch results back to main thread: call chunk's apply
 	# PackedInt32Array can be passed through call_deferred

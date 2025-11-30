@@ -8,6 +8,8 @@ const GAME_NAME: String = "Voxel Path: Artisan's Realm"
 const VOXEL_SIZE: float = 0.25
 const CHUNK_SIZE: int = 64 # 16 meters wide (64 * 0.25)
 const CHUNK_WORLD_SIZE: float = CHUNK_SIZE * VOXEL_SIZE
+const SEA_LEVEL: int = 1024 # 海平面高度（格子），对应256方块（1024*0.25），地表与水体主要分布于此
+const MAX_TERRAIN_HEIGHT: int = 3072 # 自然方块生成上限（格子），对应768方块（3072*0.25），用于山地/悬崖等地形
 const VOXEL_MAX_HEIGHT: int = 1024 # 256 meters high (1024 * 0.25) - Adjusted from 4096 for initial stability
 
 const AIR_BLOCK_ID: int = 0

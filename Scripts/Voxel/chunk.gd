@@ -54,25 +54,65 @@ func _init(pos: Vector2i) -> void:
 	_dirty_sections = PackedInt32Array()
 
 func _ready() -> void:
+	# 添加区块整体碰撞体积（用于玩家进入/离开判定，不参与物理阻挡）
 	sections_node = Node3D.new()
 	sections_node.name = "Sections"
 	add_child(sections_node)
-	
-	var num_sections = ceil(Constants.VOXEL_MAX_HEIGHT / float(Constants.CHUNK_SECTION_SIZE))
-	sections.resize(num_sections)
-	section_bodies.resize(num_sections)
-	
+
+	# 优化：只保留地表和水体两个MeshInstance，所有Section网格合并写入
+	sections.resize(2)
+	section_bodies.resize(2)
+
 	var material = StandardMaterial3D.new()
 	material.albedo_texture = TextureManager.get_main_atlas()
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	material.vertex_color_use_as_albedo = true # Enabled for biome tinting
-	
-	for i in range(num_sections):
+	material.vertex_color_use_as_albedo = true
+
+	for i in range(2):
 		var mesh_inst = MeshInstance3D.new()
-		mesh_inst.name = "Section_%d" % i
+		mesh_inst.name = "Surface" if i == 0 else "Water"
 		mesh_inst.material_override = material
 		sections_node.add_child(mesh_inst)
 		sections[i] = mesh_inst
+
+	var chunk_size_vec = Vector3(Constants.CHUNK_SIZE * Constants.VOXEL_SIZE, Constants.VOXEL_MAX_HEIGHT * Constants.VOXEL_SIZE, Constants.CHUNK_SIZE * Constants.VOXEL_SIZE)
+
+	var chunk_body = StaticBody3D.new()
+	chunk_body.name = "ChunkCollision"
+	var chunk_shape = BoxShape3D.new()
+	chunk_shape.size = chunk_size_vec
+	var shape_instance = CollisionShape3D.new()
+	shape_instance.shape = chunk_shape
+	chunk_body.add_child(shape_instance)
+	chunk_body.collision_layer = 0
+	chunk_body.collision_mask = 0
+	add_child(chunk_body)
+
+	var area = Area3D.new()
+	area.name = "ChunkArea"
+	var area_shape = BoxShape3D.new()
+	area_shape.size = chunk_size_vec
+	var area_shape_instance = CollisionShape3D.new()
+	area_shape_instance.shape = area_shape
+	area.add_child(area_shape_instance)
+	area.collision_layer = 0
+	area.collision_mask = 1 # 玩家应在layer 1
+	add_child(area)
+
+	# 连接信号（进入/离开）
+	area.body_entered.connect(self._on_body_entered)
+	area.body_exited.connect(self._on_body_exited)
+# 玩家进入区块Area3D的信号处理
+func _on_body_entered(body):
+	if body and body.is_in_group("player"):
+		if get_parent() and get_parent().has_method("_on_player_enter_chunk"):
+			get_parent()._on_player_enter_chunk(chunk_position)
+
+# 玩家离开区块Area3D的信号处理
+func _on_body_exited(body):
+	if body and body.is_in_group("player"):
+		if get_parent() and get_parent().has_method("_on_player_exit_chunk"):
+			get_parent()._on_player_exit_chunk(chunk_position)
 
 # 获取指定坐标的Section索引
 func _get_section_index(_x: int, y: int, _z: int) -> int:
@@ -333,39 +373,36 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 				# Use local snapshot data
 				var index = z_base_idx + x
 				var local_index = voxel_data[index]
-				
 				if local_index == 0: # Index 0 is always Air
 					continue
-				
 				# Convert Local Index -> Global ID using the snapshot palette map
 				var state_id = 0
 				if local_index < palette_map.size():
 					state_id = palette_map[local_index]
-				
 				if state_id == 0: # Air State
 					continue
-				
 				# BlockRegistry is static, safe to read if not modifying
 				var state = BlockStateRegistry.get_state(state_id)
 				if not state: continue
-				
 				var block = BlockRegistry.get_block(state.block_id)
 				if not block: continue
-				
 				var pos = Vector3(x, y, z) * voxel_size
-				
+				# 只为地表和水体生成Mesh，地下/内部方块直接跳过
+				var is_surface = false
+				if block.name == "water" or block.name == "grass" or block.name == "dirt" or block.name == "sand":
+					is_surface = true
+				# 你可以根据项目实际地表方块名扩展
+				if not is_surface:
+					continue
 				# --- Face Culling Logic ---
-				
 				# Top (y+1)
 				if y == Constants.VOXEL_MAX_HEIGHT - 1 or (y < Constants.VOXEL_MAX_HEIGHT - 1 and voxel_data[index + stride_y] == 0):
 					add_face(st, pos, "top", block)
 					has_faces = true
-				
 				# Bottom (y-1)
 				if y == 0 or (y > 0 and voxel_data[index - stride_y] == 0):
 					add_face(st, pos, "bottom", block)
 					has_faces = true
-				
 				# Right (x+1)
 				var draw_right = false
 				if x < chunk_size - 1:
@@ -386,11 +423,9 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 						else:
 							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
 							if n_global == 0: draw_right = true
-				
 				if draw_right:
 					add_face(st, pos, "right", block)
 					has_faces = true
-				
 				# Left (x-1)
 				var draw_left = false
 				if x > 0:
@@ -411,11 +446,9 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 						else:
 							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
 							if n_global == 0: draw_left = true
-				
 				if draw_left:
 					add_face(st, pos, "left", block)
 					has_faces = true
-				
 				# Back (z+1)
 				var draw_back = false
 				if z < chunk_size - 1:
@@ -436,11 +469,9 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 						else:
 							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
 							if n_global == 0: draw_back = true
-				
 				if draw_back:
 					add_face(st, pos, "back", block)
 					has_faces = true
-				
 				# Front (z-1)
 				var draw_front = false
 				if z > 0:
@@ -461,7 +492,6 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 						else:
 							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
 							if n_global == 0: draw_front = true
-				
 				if draw_front:
 					add_face(st, pos, "front", block)
 					has_faces = true
@@ -477,21 +507,43 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 	# Dispatch back to main thread
 	call_deferred("_apply_mesh_update", section_idx, mesh_arrays)
 
+
 # --- Main Thread Function ---
-func _apply_mesh_update(section_idx: int, mesh_arrays: Array) -> void:
+# 支持批量mesh写回：section_idx可为int或Array，mesh_arrays可为Array或Array<Array>
+func _apply_mesh_update(section_idx, mesh_arrays) -> void:
+	# 优化：所有Section网格合并为地表和水体两个MeshInstance
+	if typeof(section_idx) == TYPE_ARRAY and typeof(mesh_arrays) == TYPE_ARRAY:
+		# mesh_arrays[0]为地表，mesh_arrays[1]为水体
+		for i in range(2):
+			var arr = mesh_arrays[i] if i < mesh_arrays.size() else []
+			var mesh_inst = sections[i]
+			if section_bodies[i]:
+				section_bodies[i].queue_free()
+				section_bodies[i] = null
+			if arr.size() > 0:
+				var arr_mesh = ArrayMesh.new()
+				arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
+				mesh_inst.mesh = arr_mesh
+				mesh_inst.create_trimesh_collision()
+				if mesh_inst.get_child_count() > 0:
+					var child = mesh_inst.get_child(mesh_inst.get_child_count() - 1)
+					if child is StaticBody3D:
+						section_bodies[i] = child
+			else:
+				mesh_inst.mesh = null
+		return
+	# 单个section写回（兼容旧逻辑，写入地表MeshInstance）
+	if section_idx < 0 or section_idx >= 2:
+		MyLogger.error("[Chunk] _apply_mesh_update: section_idx %d 越界, sections.size()=%d" % [section_idx, sections.size()])
+		return
 	var mesh_inst = sections[section_idx]
-	
-	# Clear existing collision
 	if section_bodies[section_idx]:
 		section_bodies[section_idx].queue_free()
 		section_bodies[section_idx] = null
-
 	if mesh_arrays.size() > 0:
 		var arr_mesh = ArrayMesh.new()
 		arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays)
 		mesh_inst.mesh = arr_mesh
-		
-		# Create collision (Must be on main thread)
 		mesh_inst.create_trimesh_collision()
 		if mesh_inst.get_child_count() > 0:
 			var child = mesh_inst.get_child(mesh_inst.get_child_count() - 1)
@@ -722,3 +774,36 @@ func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> 
 	st.set_color(color)
 	st.set_uv(uv_tr)
 	st.add_vertex(v_tr)
+
+
+func unload_chunk() -> void:
+	# 释放所有Section Mesh和物理体
+	for mesh in sections:
+		if mesh and mesh.is_inside_tree():
+			mesh.queue_free()
+	sections.clear()
+	for body in section_bodies:
+		if body and body.is_inside_tree():
+			body.queue_free()
+	section_bodies.clear()
+	# 释放Sections节点
+	if sections_node and sections_node.is_inside_tree():
+		sections_node.queue_free()
+	# 释放ChunkArea和ChunkCollision
+	var area = get_node_or_null("ChunkArea")
+	if area and area.is_inside_tree():
+		area.queue_free()
+	var chunk_body = get_node_or_null("ChunkCollision")
+	if chunk_body and chunk_body.is_inside_tree():
+		chunk_body.queue_free()
+	# 清理邻居引用
+	neighbor_front = null
+	neighbor_back = null
+	neighbor_left = null
+	neighbor_right = null
+	# 清理体素数据和Palette
+	voxels = PackedByteArray()
+	palette = null
+	# 清理Section状态
+	_generated_sections = PackedByteArray()
+	_dirty_sections = PackedInt32Array()

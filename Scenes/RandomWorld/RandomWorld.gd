@@ -35,6 +35,43 @@ var _last_chunk_update: float = 0.0
 const CHUNK_UPDATE_INTERVAL: float = 0.5 # 每0.5秒更新一次区块加载
 
 var _player: CharacterBody3D
+var _current_player_chunk = Vector2i(-99999, -99999) # 玩家当前所在区块，特殊值表示未初始化
+
+
+# 玩家进入区块Area3D的信号处理
+func _on_player_enter_chunk(chunk_pos: Vector2i) -> void:
+	if _current_player_chunk != chunk_pos:
+		_current_player_chunk = chunk_pos
+		# Debug输出进入的区块坐标
+		MyLogger.info("[DEBUG] Player entered chunk: %s" % str(chunk_pos))
+		# 进入新区块时，主动触发区块加载逻辑
+		if DEBUG_GEN:
+			MyLogger.debug("[PLAYER] Entered chunk %s" % str(chunk_pos))
+		_update_chunk_loading()
+
+# 玩家离开区块Area3D的信号处理（可用于后续卸载优化）
+func unload_chunk_from_world(chunk_pos: Vector2i) -> void:
+	if _chunks.has(chunk_pos):
+		var chunk = _chunks[chunk_pos]
+		if is_instance_valid(chunk):
+			chunk.unload_chunk()
+			chunk.queue_free()
+		_chunks.erase(chunk_pos)
+		
+func _on_player_exit_chunk(chunk_pos: Vector2i) -> void:
+	# 记录并自动卸载远离区块
+	if DEBUG_GEN:
+		MyLogger.debug("[PLAYER] Exited chunk %s" % str(chunk_pos))
+	# 自动检测并卸载远离区块
+	var player_chunk = _current_player_chunk
+	var unload_distance = view_distance + 2 # 卸载阈值，可调整
+	var to_unload = []
+	for pos in _chunks.keys():
+		var dist = max(abs(pos.x - player_chunk.x), abs(pos.y - player_chunk.y))
+		if dist > unload_distance:
+			to_unload.append(pos)
+	for pos in to_unload:
+		unload_chunk_from_world(pos)
 var _deferred_generation_chunks: Dictionary = {} # Vector2i -> true 表示已创建但延迟生成
 # When player comes within `simulation_distance`, deferred chunks start generating
 @export var initial_spawn_dim: int = 3 # number of chunks per side to immediately generate at spawn (3 => 3x3=9, 4 => 4x4=16)
@@ -53,33 +90,46 @@ func _enqueue_mesh_update(chunk: Chunk) -> void:
 func _process_mesh_updates(_delta: float) -> void:
 	if _mesh_update_queue.size() == 0:
 		return
-	var processed = 0
+	var _processed = 0
 	var pcx = null
 	var pcz = null
 	if is_instance_valid(_player):
 		pcx = floor(_player.global_position.x / Constants.CHUNK_WORLD_SIZE)
 		pcz = floor(_player.global_position.z / Constants.CHUNK_WORLD_SIZE)
 
-	while processed < max_mesh_updates_per_frame and _mesh_update_queue.size() > 0:
-		var best_idx = 0
+	# 按玩家距离排序Mesh写回队列，优先处理视野内区块，远离区块延迟
+	var sorted_queue = []
+	for ch in _mesh_update_queue:
+		if not is_instance_valid(ch):
+			continue
+		var cp = ch.chunk_position
+		var d = 999999
 		if pcx != null:
-			var best_d = 999999
-			for i in range(_mesh_update_queue.size()):
-				var ch = _mesh_update_queue[i]
-				if not is_instance_valid(ch):
-					continue
-				var cp = ch.chunk_position
-				var d = max(abs(cp.x - pcx), abs(cp.y - pcz))
-				if d < best_d:
-					best_d = d
-					best_idx = i
-		var c = _mesh_update_queue[best_idx]
-		_mesh_update_queue.remove_at(best_idx)
+			d = max(abs(cp.x - pcx), abs(cp.y - pcz))
+		sorted_queue.append({"chunk": ch, "dist": d})
+
+	sorted_queue.sort_custom(func(a, b): return a["dist"] < b["dist"])
+
+	var max_per_frame = max_mesh_updates_per_frame
+	var to_update = []
+	for i in range(min(max_per_frame, sorted_queue.size())):
+		to_update.append(sorted_queue[i]["chunk"])
+
+	# 剩余区块延迟写回，保留在队列
+	var new_queue = []
+	for i in range(sorted_queue.size()):
+		if i >= max_per_frame:
+			new_queue.append(sorted_queue[i]["chunk"])
+	_mesh_update_queue = new_queue
+
+	for c in to_update:
 		if is_instance_valid(c):
 			c.generate_mesh()
-		processed += 1
+			_processed += 1
 
 func _ready() -> void:
+	MyLogger.info("[RandomWorld] _ready called")
+	MyLogger.info("[RandomWorld] _ready called")
 	_initialize_systems()
 	# 在下一帧设置玩家引用，确保场景完全加载
 	call_deferred("_setup_player")
@@ -94,7 +144,7 @@ func _generate_spawn_area() -> void:
 	if not _player:
 		return
 	
-	print("Generating spawn area...")
+	MyLogger.info("Generating spawn area...")
 	
 	# 首先找到一个合适的出生点
 	var spawn_position = _find_suitable_spawn_position()
@@ -158,11 +208,11 @@ func _generate_spawn_area() -> void:
 			if in_initial:
 				_enqueue_chunk_generation(chunk, ChunkGenerationStage.BASE_TERRAIN)
 				if DEBUG_GEN:
-					print("[GEN] Spawn enqueue -> %s dist=%d" % [chunk.name, dist])
+					MyLogger.debug("[GEN] Spawn enqueue -> %s dist=%d" % [chunk.name, dist])
 			else:
 				_deferred_generation_chunks[chunk.chunk_position] = true
 				if DEBUG_GEN:
-					print("[GEN] Spawn deferred -> %s dist=%d" % [chunk.name, dist])
+					MyLogger.debug("[GEN] Spawn deferred -> %s dist=%d" % [chunk.name, dist])
 
 	# 可选：等待最近邻的一些基础阶段完成以避免玩家瞬移到完全空白的地面
 	# 这里采用非阻塞的方式轮询，最多等待若干帧（例如 120 帧 ~ 2 秒），以平滑体验
@@ -186,7 +236,7 @@ func _generate_spawn_area() -> void:
 		if is_instance_valid(chunk) and chunk.generation_stage >= ChunkGenerationStage.FULLY_GENERATED:
 			_enqueue_mesh_update(chunk)
 	
-	print("Spawn area generation completed")
+	MyLogger.info("Spawn area generation completed")
 
 # 寻找合适的出生点
 func _find_suitable_spawn_position() -> Vector3:
@@ -236,9 +286,9 @@ func _load_or_generate_chunk_immediate(chunk_pos: Vector2i) -> void:
 	if not ChunkSerializerScript.load_chunk(chunk, SAVE_DIR_CHUNKS):
 		# 如果加载失败则将生成任务加入队列（分帧处理），避免阻塞主线程
 		_enqueue_chunk_generation(chunk, ChunkGenerationStage.BASE_TERRAIN)
-		print("Started generating new chunk at %d, %d (enqueued)" % [chunk_pos.x, chunk_pos.y])
+		MyLogger.info("Started generating new chunk at %d, %d (enqueued)" % [chunk_pos.x, chunk_pos.y])
 	else:
-		print("Loaded existing chunk at %d, %d" % [chunk_pos.x, chunk_pos.y])
+		MyLogger.info("Loaded existing chunk at %d, %d" % [chunk_pos.x, chunk_pos.y])
 		# 如果已完全生成，则更新网格
 		if chunk.generation_stage >= ChunkGenerationStage.FULLY_GENERATED:
 				_enqueue_mesh_update(chunk)
@@ -247,7 +297,7 @@ func _load_or_generate_chunk_immediate(chunk_pos: Vector2i) -> void:
 	_update_chunk_neighbors(chunk_pos)
 
 func _initialize_systems() -> void:
-		print("Initializing systems for RandomWorld...")
+		MyLogger.info("Initializing systems for RandomWorld...")
 		
 		# Ensure singletons are present
 		if not TextureManager.get_instance():
@@ -266,7 +316,7 @@ func _initialize_systems() -> void:
 		add_child(block_manager)
 
 func _on_loading_complete() -> void:
-		print("Block loading complete. Generating world...")
+		MyLogger.info("Block loading complete. Generating world...")
 		
 		# Initialize World Generator
 		var WorldGeneratorScript = load("res://Scripts/Voxel/world_generator.gd")
@@ -287,6 +337,8 @@ func _on_loading_complete() -> void:
 		_generate_world()
 
 func _process(delta: float) -> void:
+	MyLogger.info("[RandomWorld] _process called, delta=%.3f" % delta)
+	MyLogger.info("[RandomWorld] _process called, delta=%.3f" % delta)
 	# FPS计算
 	_frame_count += 1
 	_last_process_time += delta
@@ -294,14 +346,14 @@ func _process(delta: float) -> void:
 		_fps = _frame_count / _last_process_time
 		_frame_count = 0
 		_last_process_time = 0.0
-		# print("FPS: %.2f" % _fps) # 可以取消注释来查看FPS
-	
+		# MyLogger.info("FPS: %.2f" % _fps) # 可以取消注释来查看FPS
+
 	# 处理分阶段地形生成
 	_process_chunk_generation(delta)
 
 	# 处理受限的网格更新队列（每帧限制）
 	_process_mesh_updates(delta)
-	
+
 	# 控制区块加载频率，避免过于频繁
 	_last_chunk_update += delta
 	if _last_chunk_update >= CHUNK_UPDATE_INTERVAL:
@@ -370,7 +422,7 @@ func _process_chunk_generation(delta: float) -> void:
 			for i in range(start_i, end_i):
 				_section_generation_queue.append({"chunk": d.chunk, "section_index": i, "stage": d.stage})
 				if DEBUG_GEN and i % 4 == 0:
-					print("[GEN] Enqueued section (deferred)-> chunk=%s stage=%d section=%d queue_len=%d" % [d.chunk.name, d.stage, i, _section_generation_queue.size()])
+					MyLogger.info("[GEN] Enqueued section (deferred)-> chunk=%s stage=%d section=%d queue_len=%d" % [d.chunk.name, d.stage, i, _section_generation_queue.size()])
 
 			# if still have remaining sections, push back with updated next_section
 			if end_i < num_sections:
@@ -393,7 +445,7 @@ func _process_chunk_generation(delta: float) -> void:
 				# 提交到 WorldGenerator 的后台 section 生成任务（异步）
 				_world_generator.generate_chunk_section_async(task.chunk, task.section_index, task.stage)
 				if DEBUG_GEN:
-					print("[GEN] Submit section task -> chunk=%s stage=%d section=%d" % [task.chunk.name, task.stage, task.section_index])
+					MyLogger.info("[GEN] Submit section task -> chunk=%s stage=%d section=%d" % [task.chunk.name, task.stage, task.section_index])
 				generations_processed += 1
 		
 		# 处理区块生成任务
@@ -410,7 +462,7 @@ func _process_chunk_generation(delta: float) -> void:
 				var chunk = task.chunk
 				var stage = task.stage
 				if DEBUG_GEN:
-					print("[GEN] Processing chunk stage -> chunk=%s stage=%d" % [chunk.name, stage])
+					MyLogger.info("[GEN] Processing chunk stage -> chunk=%s stage=%d" % [chunk.name, stage])
 				
 				# 执行对应阶段的生成
 				_world_generator.generate_chunk_stage(chunk, stage)
@@ -429,36 +481,38 @@ func _process_chunk_generation(delta: float) -> void:
 
 # 将区块生成任务加入队列
 func _enqueue_chunk_generation(chunk: Chunk, stage: int) -> void:
+	MyLogger.info("[RandomWorld] _enqueue_chunk_generation called for chunk %s, stage %d" % [str(chunk), stage])
 	# If an Emerger is present, delegate enqueueing to it
 	if _emerge_manager:
+		MyLogger.info("[RandomWorld] EmergeManager.enqueue_chunk_generation called for chunk %s, stage %d" % [str(chunk), stage])
 		_emerge_manager.enqueue_chunk_generation(chunk, stage)
 		return
 	# 检查WorldGenerator是否仍然有效
 	if not is_instance_valid(_world_generator):
+		MyLogger.debug("[GEN] -无效 Skipping chunk generation for chunk=%s stage=%d" % [chunk.name, stage])
 		return
 	# 如果相同 chunk 和阶段已被入队，跳过
 	var existing = _chunk_stage_pending.get(chunk)
 	if existing and existing.stage == stage:
+		MyLogger.debug("[GEN] -跳过 Skipping chunk generation for chunk=%s stage=%d" % [chunk.name, stage])
 		return
 
 	# 拆分为 section 级任务以减小每帧负载
 	var num_sections = int(ceil(Constants.VOXEL_MAX_HEIGHT / float(Constants.CHUNK_SECTION_SIZE)))
 	_chunk_stage_pending[chunk] = {"stage": stage, "pending": num_sections}
 
-	if DEBUG_GEN:
-		print("[GEN] Enqueue chunk -> %s stage=%d sections=%d" % [chunk.name, stage, num_sections])
+	MyLogger.info("[GEN] Enqueue chunk -> %s stage=%d sections=%d" % [chunk.name, stage, num_sections])
+
 
 	# 如果全局待处理 section 数量已经非常大，延迟展开该 chunk 的 section 入队
 	if _section_generation_queue.size() + num_sections > MAX_PENDING_SECTION_QUEUE:
 		# 推入延迟队列，稍后由 _process_chunk_generation 分帧展开
 		_deferred_chunk_enqueues.append({"chunk": chunk, "stage": stage, "num_sections": num_sections})
-		if DEBUG_GEN:
-			print("[GEN] Deferred enqueue -> %s stage=%d sections=%d (queue_len=%d)" % [chunk.name, stage, num_sections, _section_generation_queue.size()])
+		MyLogger.info("[GEN] Deferred enqueue -> %s stage=%d sections=%d (queue_len=%d)" % [chunk.name, stage, num_sections, _section_generation_queue.size()])
+
 		return
 
-	for i in range(num_sections):
-		_enqueue_section_generation(chunk, i, stage)
-
+	
 # 将Section生成任务加入队列
 func _enqueue_section_generation(chunk: Chunk, section_index: int, stage: int) -> void:
 	# 检查WorldGenerator是否仍然有效
@@ -471,8 +525,8 @@ func _enqueue_section_generation(chunk: Chunk, section_index: int, stage: int) -
 		"stage": stage
 	})
 	if DEBUG_GEN and section_index % 4 == 0:
-		# Reduce noise by only printing every 4th section
-		print("[GEN] Enqueued section -> chunk=%s stage=%d section=%d queue_len=%d" % [chunk.name, stage, section_index, _section_generation_queue.size()])
+		# Reduce noise by only MyLogger.infoing every 4th section
+		MyLogger.info("[GEN] Enqueued section -> chunk=%s stage=%d section=%d queue_len=%d" % [chunk.name, stage, section_index, _section_generation_queue.size()])
 
 
 # Called by Chunk when a section has been applied on the main thread
@@ -483,15 +537,21 @@ func _on_chunk_section_complete(chunk: Chunk, stage: int) -> void:
 
 	info.pending -= 1
 	if DEBUG_GEN:
-		print("[GEN] Section complete -> chunk=%s stage=%d remaining=%d" % [chunk.name, stage, info.pending])
+		MyLogger.info("[GEN] Section complete -> chunk=%s stage=%d remaining=%d" % [chunk.name, stage, info.pending])
+	# 优化：每个区块分组分阶段推进，基础地形完成后立即触发后续阶段
 	if info.pending <= 0:
-		# 当前阶段所有 section 完成
 		chunk.generation_stage = info.stage
 		_chunk_stage_pending.erase(chunk)
-		if info.stage < ChunkGenerationStage.FULLY_GENERATED:
-			_enqueue_chunk_generation(chunk, info.stage + 1)
-		else:
+		if info.stage == ChunkGenerationStage.BASE_TERRAIN:
+			# 基础地形完成后立即触发水体和表层
+			_enqueue_chunk_generation(chunk, ChunkGenerationStage.WATER_AND_SURFACE)
+		elif info.stage == ChunkGenerationStage.WATER_AND_SURFACE:
+			# 水体和表层完成后立即触发装饰物
+			_enqueue_chunk_generation(chunk, ChunkGenerationStage.DECORATIONS)
+		elif info.stage == ChunkGenerationStage.DECORATIONS:
+			# 装饰物完成后才触发mesh写回
 			_enqueue_mesh_update(chunk)
+		# 其他阶段可按需扩展
 
 # 根据玩家位置更新区块加载
 func _update_chunk_loading() -> void:
@@ -587,7 +647,7 @@ func _update_chunk_loading() -> void:
 					_enqueue_chunk_generation(c, ChunkGenerationStage.BASE_TERRAIN)
 					_deferred_generation_chunks.erase(chunk_pos)
 					if DEBUG_GEN:
-						print("[GEN] Triggered deferred generation -> %s dist=%d" % [c.name, cheb])
+						MyLogger.info("[GEN] Triggered deferred generation -> %s dist=%d" % [c.name, cheb])
 
 # 更新区块邻居引用
 func _update_chunk_neighbors(chunk_pos: Vector2i) -> void:
@@ -668,7 +728,7 @@ func _unload_chunk(chunk_pos: Vector2i) -> void:
 		# 从场景树中移除并释放
 		chunk.queue_free()
 		_chunks.erase(chunk_pos)
-		print("Unloaded chunk at %d, %d" % [chunk_pos.x, chunk_pos.y])
+		MyLogger.info("Unloaded chunk at %d, %d" % [chunk_pos.x, chunk_pos.y])
 
 # 加载或生成新区块
 func _load_or_generate_chunk(chunk_pos: Vector2i) -> void:
@@ -687,9 +747,9 @@ func _load_or_generate_chunk(chunk_pos: Vector2i) -> void:
 	if not ChunkSerializerScript.load_chunk(chunk, SAVE_DIR_CHUNKS):
 		# 如果加载失败则开始生成
 		_enqueue_chunk_generation(chunk, ChunkGenerationStage.BASE_TERRAIN)
-		print("Started generating new chunk at %d, %d" % [chunk_pos.x, chunk_pos.y])
+		MyLogger.info("Started generating new chunk at %d, %d" % [chunk_pos.x, chunk_pos.y])
 	else:
-		print("Loaded existing chunk at %d, %d" % [chunk_pos.x, chunk_pos.y])
+		MyLogger.info("Loaded existing chunk at %d, %d" % [chunk_pos.x, chunk_pos.y])
 		# 如果已完全生成，则更新网格
 		if chunk.generation_stage >= ChunkGenerationStage.FULLY_GENERATED:
 			_enqueue_mesh_update(chunk)
@@ -712,18 +772,18 @@ func _create_chunk_node(chunk_pos: Vector2i, enqueue_immediately: bool) -> void:
 	var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
 	if ChunkSerializerScript.load_chunk(chunk, SAVE_DIR_CHUNKS):
 		if DEBUG_GEN:
-			print("Loaded chunk %d,%d from disk" % [chunk_pos.x, chunk_pos.y])
+			MyLogger.info("Loaded chunk %d,%d from disk" % [chunk_pos.x, chunk_pos.y])
 			if chunk.generation_stage >= ChunkGenerationStage.FULLY_GENERATED:
 				_enqueue_mesh_update(chunk)
 	else:
 		if enqueue_immediately:
 			_enqueue_chunk_generation(chunk, ChunkGenerationStage.BASE_TERRAIN)
 			if DEBUG_GEN:
-				print("[GEN] Immediately enqueued created chunk -> %d,%d" % [chunk_pos.x, chunk_pos.y])
+				MyLogger.info("[GEN] Immediately enqueued created chunk -> %d,%d" % [chunk_pos.x, chunk_pos.y])
 		else:
 			_deferred_generation_chunks[chunk_pos] = true
 			if DEBUG_GEN:
-				print("[GEN] Created chunk deferred -> %d,%d" % [chunk_pos.x, chunk_pos.y])
+				MyLogger.info("[GEN] Created chunk deferred -> %d,%d" % [chunk_pos.x, chunk_pos.y])
 
 	_update_chunk_neighbors(chunk_pos)
 
@@ -735,7 +795,7 @@ func set_player(player: Node3D) -> void:
 func _generate_world() -> void:
 	if _is_generating: return
 	_is_generating = true
-	print("Starting world generation...")
+	MyLogger.info("Starting world generation...")
 	
 	var start_time = Time.get_ticks_msec()
 	
@@ -756,7 +816,7 @@ func _generate_world() -> void:
 		if dist > view_distance:
 			continue
 		if DEBUG_GEN:
-			print("Creating chunk %d,%d (dist=%d)" % [cx, cz, dist])
+			MyLogger.info("Creating chunk %d,%d (dist=%d)" % [cx, cz, dist])
 		var chunk_pos = Vector2i(cx, cz)
 		if _chunks.has(chunk_pos):
 			continue
@@ -773,14 +833,14 @@ func _generate_world() -> void:
 			if _is_within_initial_spawn(chunk_pos, center_chunk):
 				_enqueue_chunk_generation(chunk, ChunkGenerationStage.BASE_TERRAIN)
 				if DEBUG_GEN:
-					print("[GEN] Enqueue generated chunk -> %d,%d (dist=%d)" % [cx, cz, dist])
+					MyLogger.info("[GEN] Enqueue generated chunk -> %d,%d (dist=%d)" % [cx, cz, dist])
 			else:
 				_deferred_generation_chunks[chunk_pos] = true
 				if DEBUG_GEN:
-					print("[GEN] Deferred generation for chunk -> %d,%d (dist=%d)" % [cx, cz, dist])
+					MyLogger.info("[GEN] Deferred generation for chunk -> %d,%d (dist=%d)" % [cx, cz, dist])
 		else:
 			if DEBUG_GEN:
-				print("Loaded chunk %d,%d from disk" % [cx, cz])
+				MyLogger.info("Loaded chunk %d,%d from disk" % [cx, cz])
 			# 已加载的区块直接生成网格
 			_enqueue_mesh_update(chunk)
 	
@@ -793,7 +853,7 @@ func _generate_world() -> void:
 		chunk.neighbor_back = _chunks.get(pos + Vector2i(0, 1))
 	
 	var end_time = Time.get_ticks_msec()
-	print("World generation initiated in %d ms" % (end_time - start_time))
+	MyLogger.info("World generation initiated in %d ms" % (end_time - start_time))
 	
 	# Move player to surface
 	_spawn_player()
@@ -807,7 +867,7 @@ func _spawn_player() -> void:
 		return
 	
 	# 玩家位置已经在 _generate_spawn_area 中设置
-	print("Player spawned at: %s" % _player.global_position)
+	MyLogger.info("Player spawned at: %s" % _player.global_position)
 
 const SAVE_DIR_BASE = "user://saves/world_test/"
 const SAVE_DIR_CHUNKS = "user://saves/world_test/chunks/"
@@ -820,7 +880,7 @@ func _input(event: InputEvent) -> void:
 						load_world()
 
 func save_world() -> void:
-		print("Saving world...")
+		MyLogger.info("Saving world...")
 		var start_time = Time.get_ticks_msec()
 		
 		var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
@@ -837,15 +897,15 @@ func save_world() -> void:
 				PlayerSerializerScript.save_player(player, SAVE_DIR_BASE)
 						
 		var end_time = Time.get_ticks_msec()
-		print("World saved in %d ms" % (end_time - start_time))
+		MyLogger.info("World saved in %d ms" % (end_time - start_time))
 
 func load_world() -> void:
 		if _is_generating:
-				print("World is currently processing, please wait.")
+				MyLogger.info("World is currently processing, please wait.")
 				return
 				
 		_is_generating = true
-		print("Loading world...")
+		MyLogger.info("Loading world...")
 		var start_time = Time.get_ticks_msec()
 		
 		var ChunkSerializerScript = load("res://Scripts/Persistence/chunk_serializer.gd")
@@ -868,10 +928,10 @@ func load_world() -> void:
 		var player = $ProtoController
 		if player:
 				if PlayerSerializerScript.load_player(player, SAVE_DIR_BASE):
-						print("Player state loaded.")
+						MyLogger.info("Player state loaded.")
 		
 		var end_time = Time.get_ticks_msec()
-		print("World loaded (%d chunks) in %d ms" % [loaded_count, end_time - start_time])
+		MyLogger.info("World loaded (%d chunks) in %d ms" % [loaded_count, end_time - start_time])
 		_is_generating = false
 
 func set_voxel_at(pos: Vector3i, block_id: int) -> void:

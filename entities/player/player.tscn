@@ -1,16 +1,26 @@
-[gd_scene load_steps=6 format=3 uid="uid://cu5tf4n03girv"]
+[gd_scene load_steps=9 format=3 uid="uid://cu5tf4n03girv"]
 
 [ext_resource type="Script" uid="uid://b1c3n6aiws5kt" path="res://entities/player/scripts/Player.cs" id="1_symyc"]
-[ext_resource type="Script" uid="uid://yvum1rbnmowh" path="res://entities/player/scripts/BlockSelector.cs" id="2_sglur"]
 [ext_resource type="Script" uid="uid://bxqh1clqldu6t" path="res://entities/player/scripts/Crosshair.cs" id="3_bls4j"]
+[ext_resource type="Script" uid="uid://dk2foxtm2v7n2" path="res://entities/player/scripts/PlayerAttribution.cs" id="4_player_attr"]
+[ext_resource type="Script" uid="uid://bay701au6icr" path="res://entities/player/scripts/ActionAttribution.cs" id="5_action_attr"]
+
+[sub_resource type="Resource" id="Resource_sglur"]
+script = ExtResource("4_player_attr")
+
+[sub_resource type="Resource" id="Resource_bls4j"]
+script = ExtResource("5_action_attr")
 
 [sub_resource type="BoxMesh" id="BoxMesh_sfv1e"]
-size = Vector3(1, 1.76, 1)
+size = Vector3(1, 1.8, 1)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_sfv1e"]
+size = Vector3(1, 1.8, 1)
 
 [node name="Player" type="CharacterBody3D"]
 script = ExtResource("1_symyc")
+PlayerAttribution = SubResource("Resource_sglur")
+ActionAttribution = SubResource("Resource_bls4j")
 
 [node name="BodyInstance" type="MeshInstance3D" parent="."]
 mesh = SubResource("BoxMesh_sfv1e")
@@ -19,15 +29,20 @@ mesh = SubResource("BoxMesh_sfv1e")
 shape = SubResource("BoxShape3D_sfv1e")
 
 [node name="Head" type="Node3D" parent="."]
-script = ExtResource("2_sglur")
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5307567, 0)
 
 [node name="Camera3D" type="Camera3D" parent="Head"]
+fov = 70.0
 
 [node name="RayCast3D" type="RayCast3D" parent="Head"]
 
 [node name="Crosshair" type="Control" parent="."]
 layout_mode = 3
-anchors_preset = 0
-offset_right = 40.0
-offset_bottom = 40.0
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+grow_horizontal = 2
+grow_vertical = 2
 script = ExtResource("3_bls4j")

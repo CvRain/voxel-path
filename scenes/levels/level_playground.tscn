@@ -1,7 +1,10 @@
-[gd_scene load_steps=8 format=3 uid="uid://7nxtndyip7b2"]
+[gd_scene load_steps=13 format=3 uid="uid://7nxtndyip7b2"]
 
 [ext_resource type="PackedScene" uid="uid://cu5tf4n03girv" path="res://entities/player/player.tscn" id="1_7pc7d"]
 [ext_resource type="Script" uid="uid://pgs2fud0wdar" path="res://systems/WorldInteractionManager.cs" id="2_mef1g"]
+[ext_resource type="Script" uid="uid://yvum1rbnmowh" path="res://entities/player/scripts/BlockSelector.cs" id="3_3jdeg"]
+[ext_resource type="Script" uid="uid://dk2foxtm2v7n2" path="res://entities/player/scripts/PlayerAttribution.cs" id="4_player_attr"]
+[ext_resource type="Script" uid="uid://bay701au6icr" path="res://entities/player/scripts/ActionAttribution.cs" id="5_action_attr"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_52bqy"]
 sky_horizon_color = Color(0.66224277, 0.6717428, 0.6867428, 1)
@@ -22,6 +25,14 @@ glow_enabled = true
 [sub_resource type="PlaneMesh" id="PlaneMesh_52bqy"]
 size = Vector2(50, 50)
 
+[sub_resource type="Resource" id="Resource_ry44l"]
+resource_local_to_scene = true
+script = ExtResource("4_player_attr")
+
+[sub_resource type="Resource" id="Resource_hajl7"]
+resource_local_to_scene = true
+script = ExtResource("5_action_attr")
+
 [node name="LevelPlayground" type="Node3D"]
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
@@ -37,12 +48,19 @@ environment = SubResource("Environment_mef1g")
 shape = SubResource("WorldBoundaryShape3D_52bqy")
 
 [node name="MeshInstance3D" type="MeshInstance3D" parent="StaticBody3D"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.011704445, -4.7683716e-07, 0.0063934326)
 mesh = SubResource("PlaneMesh_52bqy")
 skeleton = NodePath("../..")
 
 [node name="Player" parent="." instance=ExtResource("1_7pc7d")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.393856, 0)
+PlayerAttribution = SubResource("Resource_ry44l")
+ActionAttribution = SubResource("Resource_hajl7")
 
-[node name="WorldInteractionManager" type="Node" parent="." node_paths=PackedStringArray("_player")]
+[node name="WorldInteractionManager" type="Node" parent="." node_paths=PackedStringArray("_player", "_blockSelector")]
 script = ExtResource("2_mef1g")
 _player = NodePath("../Player")
+_blockSelector = NodePath("../BlockSelector")
+
+[node name="BlockSelector" type="MeshInstance3D" parent="."]
+script = ExtResource("3_3jdeg")

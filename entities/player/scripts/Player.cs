@@ -8,14 +8,11 @@ namespace VoxelPath.entities.player.scripts;
 
 public partial class Player : CharacterBody3D
 {
-    public event Action<Vector3I, Vector3> HoveredBlockChanged;
-    public event Action HoveredBlockExited;
-
     [ExportGroup("Configuration")]
     [Export]
-    public PlayerAttribution PlayerAttribution { get; private set; }
+    public PlayerAttribution PlayerAttribution { get; set; }
 
-    [Export] public ActionAttribution ActionAttribution { get; private set; }
+    [Export] public ActionAttribution ActionAttribution { get; set; }
 
     [ExportGroup("Debug")]
     [Export] public bool EnableDebug { get; set; }
@@ -57,6 +54,21 @@ public partial class Player : CharacterBody3D
     private float _lastInteractTime;
     private Vector3I? _lastHoveredVoxel;
 
+    // 公开属性供外部访问
+    public int BrushSize => _brushSize;
+    public RayCast3D RayCast => _rayCast;
+
+    // 射线检测事件
+    public event Action<Vector3I, Vector3> HoveredBlockChanged;
+    public event Action HoveredBlockExited;
+
+    // 交互事件
+    public event Action<Vector3I, Vector3> LeftClickBlock;
+    public event Action<Vector3I, Vector3> RightClickBlock;
+
+    // 笔刷事件
+    public event Action<int> BrushSizeChanged;
+
 
     public override void _Ready()
     {
@@ -77,7 +89,7 @@ public partial class Player : CharacterBody3D
     {
         _head = GetNode<Node3D>("Head");
         _camera = _head.GetNode<Camera3D>("Camera3D");
-        _bodyCollision = GetNode<CollisionShape3D>("CollisionShape3D");
+        _bodyCollision = GetNode<CollisionShape3D>("BodyCollision");
         _rayCast = _head.GetNode<RayCast3D>("RayCast3D");
     }
 
@@ -90,8 +102,11 @@ public partial class Player : CharacterBody3D
 
     private void InitializeInteraction()
     {
-        _rayCast.TargetPosition = new Vector3(0, 0, -PlayerAttribution.InteractionDistance);
-        _rayCast.AddException(this);
+        if (_rayCast != null)
+        {
+            _rayCast.TargetPosition = new Vector3(0, 0, -PlayerAttribution.InteractionDistance);
+            _rayCast.AddException(this);
+        }
     }
 
     public override void _Input(InputEvent @event)
@@ -142,7 +157,7 @@ public partial class Player : CharacterBody3D
 
     public override void _PhysicsProcess(double delta)
     {
-        float dt = (float)delta;
+        var dt = (float)delta;
         _lastJumpPressTime += dt;
 
         UpdateDebug(dt);
@@ -162,11 +177,9 @@ public partial class Player : CharacterBody3D
         if (!EnableDebug) return;
 
         _debugTimer += delta;
-        if (_debugTimer >= DebugInterval)
-        {
-            _debugTimer = 0.0f;
-            GD.Print($"Player Pos: {GlobalPosition} | State: {_currentMoveState} | Stepping: {_steppingUp}");
-        }
+        if (!(_debugTimer >= DebugInterval)) return;
+        _debugTimer = 0.0f;
+        GD.Print($"Player Pos: {GlobalPosition} | State: {_currentMoveState} | Stepping: {_steppingUp}");
     }
 
     private void ToggleFlyMode()
@@ -215,7 +228,7 @@ public partial class Player : CharacterBody3D
         var moveDir = (Transform.Basis * new Vector3(inputDir.X, 0, inputDir.Y)).Normalized();
 
         // Determine target speed
-        float currentSpeed = GetCurrentSpeed();
+        var currentSpeed = GetCurrentSpeed();
 
         var targetVelocity = moveDir * currentSpeed;
 
@@ -258,7 +271,7 @@ public partial class Player : CharacterBody3D
 
         var targetVelocity = moveDir.Normalized() * PlayerAttribution.FlySpeed;
 
-        bool isMoving = inputDir2D != Vector2.Zero || IsActionPressed(ActionAttribution.InputJump) ||
+        var isMoving = inputDir2D != Vector2.Zero || IsActionPressed(ActionAttribution.InputJump) ||
                         IsActionPressed(ActionAttribution.InputFlyDown);
         var accel = !isMoving ? PlayerAttribution.Deceleration : PlayerAttribution.Acceleration;
 
@@ -275,20 +288,23 @@ public partial class Player : CharacterBody3D
         _currentMoveState = newState;
         Velocity = Vector3.Zero;
 
-        switch (_currentMoveState)
+        if (_bodyCollision != null)
         {
-            case MoveState.Grounded:
-                _bodyCollision.Disabled = false;
-                PlayerAttribution.EnableGravity = true;
-                break;
-            case MoveState.Flying:
-                _bodyCollision.Disabled = false;
-                PlayerAttribution.EnableGravity = false;
-                break;
-            case MoveState.Noclip:
-                _bodyCollision.Disabled = true;
-                PlayerAttribution.EnableGravity = false;
-                break;
+            switch (_currentMoveState)
+            {
+                case MoveState.Grounded:
+                    _bodyCollision.Disabled = false;
+                    PlayerAttribution.EnableGravity = true;
+                    break;
+                case MoveState.Flying:
+                    _bodyCollision.Disabled = false;
+                    PlayerAttribution.EnableGravity = false;
+                    break;
+                case MoveState.Noclip:
+                    _bodyCollision.Disabled = true;
+                    PlayerAttribution.EnableGravity = false;
+                    break;
+            }
         }
     }
 
@@ -327,7 +343,7 @@ public partial class Player : CharacterBody3D
 
         if (!TestMove(GlobalTransform, horizontalDir * 0.15f)) return; // Not blocked
 
-        float stepHeightFound = ScanStepHeight(horizontalDir);
+        var stepHeightFound = ScanStepHeight(horizontalDir);
         if (stepHeightFound > 0.0f && stepHeightFound <= PlayerAttribution.StepHeight)
         {
             StartStepUp(horizontalDir, stepHeightFound);
@@ -336,10 +352,10 @@ public partial class Player : CharacterBody3D
 
     private float ScanStepHeight(Vector3 direction)
     {
-        float scanDistance = 0.2f;
-        float stepIncrement = 0.05f;
-        float maxScanHeight = PlayerAttribution.StepHeight;
-        float currentHeight = stepIncrement;
+        const float scanDistance = 0.2f;
+        const float stepIncrement = 0.05f;
+        var maxScanHeight = PlayerAttribution.StepHeight;
+        var currentHeight = stepIncrement;
 
         while (currentHeight <= maxScanHeight)
         {
@@ -372,8 +388,8 @@ public partial class Player : CharacterBody3D
     private void UpdateStepSmoothing(float delta)
     {
         _stepElapsedTime += delta;
-        float progress = Mathf.Clamp(_stepElapsedTime / PlayerAttribution.StepSmoothTime, 0.0f, 1.0f);
-        float easedProgress = EaseOutCubic(progress);
+        var progress = Mathf.Clamp(_stepElapsedTime / PlayerAttribution.StepSmoothTime, 0.0f, 1.0f);
+        var easedProgress = EaseOutCubic(progress);
 
         GlobalPosition = _stepStartPosition.Lerp(_stepTargetPosition, easedProgress);
 
@@ -387,7 +403,7 @@ public partial class Player : CharacterBody3D
 
     private float EaseOutCubic(float t)
     {
-        float tNorm = t - 1.0f;
+        var tNorm = t - 1.0f;
         return tNorm * tNorm * tNorm + 1.0f;
     }
 
@@ -398,30 +414,26 @@ public partial class Player : CharacterBody3D
         else if (_brushSize == 2) _brushSize = 1;
         else if (_brushSize == 1) _brushSize = 4;
 
+        BrushSizeChanged?.Invoke(_brushSize);
         GD.Print($"Brush size: {_brushSize}x{_brushSize}x{_brushSize}");
     }
 
     private bool CanInteractDelay()
     {
-        float currentTime = Time.GetTicksMsec() / 1000.0f;
-        if (currentTime - _lastInteractTime > InteractDelay)
-        {
-            _lastInteractTime = currentTime;
-            return true;
-        }
+        var currentTime = Time.GetTicksMsec() / 1000.0f;
+        if (!(currentTime - _lastInteractTime > InteractDelay)) return false;
+        _lastInteractTime = currentTime;
+        return true;
 
-        return false;
     }
 
     private void HandleInteraction()
     {
         if (_rayCast == null || !_rayCast.IsColliding())
         {
-            if (_lastHoveredVoxel.HasValue)
-            {
-                _lastHoveredVoxel = null;
-                HoveredBlockExited?.Invoke();
-            }
+            if (!_lastHoveredVoxel.HasValue) return;
+            _lastHoveredVoxel = null;
+            HoveredBlockExited?.Invoke();
             return;
         }
 
@@ -441,34 +453,20 @@ public partial class Player : CharacterBody3D
         {
             if (CanInteractDelay())
             {
-                DestroyVoxels(centerGridPos);
+                LeftClickBlock?.Invoke(centerGridPos, normal);
             }
         }
         else if (Input.IsMouseButtonPressed(MouseButton.Right))
         {
             if (CanInteractDelay())
             {
-                PlaceVoxels(hitPoint, normal);
+                RightClickBlock?.Invoke(centerGridPos, normal);
             }
         }
     }
 
-    private void DestroyVoxels(Vector3I centerGridPos)
-    {
-        var targetVoxels = GetVoxelBrush(centerGridPos);
-        BatchModifyVoxels(targetVoxels, Constants.AirBlockId);
-    }
-
-    private void PlaceVoxels(Vector3 hitPoint, Vector3 normal)
-    {
-        var placePosGlobal = hitPoint + (normal * (Constants.VoxelSize * 0.5f));
-        var centerGridPosPlace = BlockSelector.WorldToVoxelIndex(placePosGlobal, Constants.VoxelSize);
-
-        var placeVoxels = GetVoxelBrush(centerGridPosPlace, normal);
-        BatchModifyVoxels(placeVoxels, 1); // 1 = Stone (Default)
-    }
-
-    private List<Vector3I> GetVoxelBrush(Vector3I center, Vector3? normal = null)
+    // 工具方法：计算笔刷覆盖的体素列表（供外部使用）
+    public List<Vector3I> GetVoxelBrush(Vector3I center, Vector3? normal = null)
     {
         var voxels = new List<Vector3I>();
         var offsetStart = -Mathf.FloorToInt(_brushSize / 2.0f);
@@ -494,63 +492,6 @@ public partial class Player : CharacterBody3D
             }
         }
         return voxels;
-    }
-
-
-    private void BatchModifyVoxels(List<Vector3I> voxelPositions, int blockId)
-    {
-        var world = GetTree().CurrentScene;
-
-        int maxSections = Mathf.CeilToInt(Constants.VoxelMaxHeight / (float)Constants.ChunkSectionSize);
-
-        var changes = new Godot.Collections.Dictionary(); // Vector2i -> Dictionary<int, bool>
-
-        foreach (var pos in voxelPositions)
-        {
-            world.Call("set_voxel_at_raw", pos, blockId);
-
-            int cx = Mathf.FloorToInt(pos.X / (float)Constants.ChunkSize);
-            int cz = Mathf.FloorToInt(pos.Z / (float)Constants.ChunkSize);
-            var chunkPos = new Vector2I(cx, cz);
-
-            if (!changes.ContainsKey(chunkPos))
-            {
-                changes[chunkPos] = new Godot.Collections.Dictionary();
-            }
-
-            var chunkChanges = (Godot.Collections.Dictionary)changes[chunkPos];
-
-            int y = pos.Y;
-            int sectionIdx = Mathf.FloorToInt(y / (float)Constants.ChunkSectionSize);
-            chunkChanges[sectionIdx] = true;
-
-            int localY = y % Constants.ChunkSectionSize;
-            if (localY == 0 && sectionIdx > 0)
-                chunkChanges[sectionIdx - 1] = true;
-            else if (localY == Constants.ChunkSectionSize - 1 && sectionIdx < maxSections - 1)
-                chunkChanges[sectionIdx + 1] = true;
-        }
-
-        if (world.HasMethod("update_chunks_sections"))
-        {
-            var finalChanges = new Godot.Collections.Dictionary();
-            foreach (var key in changes.Keys)
-            {
-                var chunkPos = (Vector2I)key;
-                var sectionsDict = (Godot.Collections.Dictionary)changes[chunkPos];
-                var sectionsArray = new Godot.Collections.Array();
-                foreach (var sectionKey in sectionsDict.Keys) sectionsArray.Add(sectionKey);
-                finalChanges[chunkPos] = sectionsArray;
-            }
-
-            world.Call("update_chunks_sections", finalChanges);
-        }
-        else if (world.HasMethod("update_chunks"))
-        {
-            var chunksArray = new Godot.Collections.Array();
-            foreach (var key in changes.Keys) chunksArray.Add(key);
-            world.Call("update_chunks", chunksArray);
-        }
     }
 
 

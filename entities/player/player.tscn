@@ -1,0 +1,33 @@
+[gd_scene load_steps=6 format=3 uid="uid://cu5tf4n03girv"]
+
+[ext_resource type="Script" uid="uid://b1c3n6aiws5kt" path="res://entities/player/scripts/Player.cs" id="1_symyc"]
+[ext_resource type="Script" uid="uid://yvum1rbnmowh" path="res://entities/player/scripts/BlockSelector.cs" id="2_sglur"]
+[ext_resource type="Script" uid="uid://bxqh1clqldu6t" path="res://entities/player/scripts/Crosshair.cs" id="3_bls4j"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_sfv1e"]
+size = Vector3(1, 1.76, 1)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_sfv1e"]
+
+[node name="Player" type="CharacterBody3D"]
+script = ExtResource("1_symyc")
+
+[node name="BodyInstance" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_sfv1e")
+
+[node name="BodyCollision" type="CollisionShape3D" parent="."]
+shape = SubResource("BoxShape3D_sfv1e")
+
+[node name="Head" type="Node3D" parent="."]
+script = ExtResource("2_sglur")
+
+[node name="Camera3D" type="Camera3D" parent="Head"]
+
+[node name="RayCast3D" type="RayCast3D" parent="Head"]
+
+[node name="Crosshair" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 40.0
+offset_bottom = 40.0
+script = ExtResource("3_bls4j")

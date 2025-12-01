@@ -38,12 +38,27 @@ var _player: CharacterBody3D
 var _current_player_chunk = Vector2i(-99999, -99999) # 玩家当前所在区块，特殊值表示未初始化
 
 
+# 更新玩家周围区块的碰撞体状态
+func _update_collision_around_player(center_chunk: Vector2i) -> void:
+	var radius = 3 # 检查半径，确保覆盖 update_collision 中定义的范围 (2)
+	for x in range(center_chunk.x - radius, center_chunk.x + radius + 1):
+		for y in range(center_chunk.y - radius, center_chunk.y + radius + 1):
+			var pos = Vector2i(x, y)
+			if _chunks.has(pos):
+				var chunk = _chunks[pos]
+				if is_instance_valid(chunk) and chunk.has_method("update_collision"):
+					chunk.update_collision(center_chunk)
+
 # 玩家进入区块Area3D的信号处理
 func _on_player_enter_chunk(chunk_pos: Vector2i) -> void:
 	if _current_player_chunk != chunk_pos:
 		_current_player_chunk = chunk_pos
 		# Debug输出进入的区块坐标
 		MyLogger.info("[DEBUG] Player entered chunk: %s" % str(chunk_pos))
+		
+		# 更新周围区块的碰撞体
+		_update_collision_around_player(chunk_pos)
+		
 		# 进入新区块时，主动触发区块加载逻辑
 		if DEBUG_GEN:
 			MyLogger.debug("[PLAYER] Entered chunk %s" % str(chunk_pos))
@@ -152,6 +167,9 @@ func _generate_spawn_area() -> void:
 	# 计算玩家所在的区块
 	var player_chunk_x = floor(spawn_position.x / Constants.CHUNK_WORLD_SIZE)
 	var player_chunk_z = floor(spawn_position.z / Constants.CHUNK_WORLD_SIZE)
+	
+	# 初始化当前玩家区块记录，确保后续碰撞体生成逻辑能正确获取距离
+	_current_player_chunk = Vector2i(player_chunk_x, player_chunk_z)
 	
 	# 使用 exported `initial_spawn_dim` 构建一个 exact dim x dim 的启动方块
 	var dim = max(1, initial_spawn_dim)

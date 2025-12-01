@@ -365,141 +365,242 @@ func _thread_generate_mesh(section_idx: int, voxel_data: PackedByteArray, palett
 	var stride_y = chunk_size * chunk_size
 	var stride_z = chunk_size
 	
+	# 贪婪网格（Strip Meshing）状态变量
+	# 我们只在 X 轴方向上合并 Top, Bottom, Front, Back 面
+	# Left 和 Right 面由于在 X 轴上不共面，无法在此循环中简单合并（需要改变循环顺序）
+	var run_top = {"active": false, "start_x": - 1, "block": null}
+	var run_bottom = {"active": false, "start_x": - 1, "block": null}
+	var run_front = {"active": false, "start_x": - 1, "block": null}
+	var run_back = {"active": false, "start_x": - 1, "block": null}
+
 	for y in range(start_y, end_y):
 		var y_base_idx = y * stride_y
 		for z in range(chunk_size):
 			var z_base_idx = y_base_idx + (z * stride_z)
+			
+			# 重置每行的 Run 状态
+			run_top = {"active": false, "start_x": - 1, "block": null}
+			run_bottom = {"active": false, "start_x": - 1, "block": null}
+			run_front = {"active": false, "start_x": - 1, "block": null}
+			run_back = {"active": false, "start_x": - 1, "block": null}
+			
 			for x in range(chunk_size):
 				# Use local snapshot data
 				var index = z_base_idx + x
 				var local_index = voxel_data[index]
-				if local_index == 0: # Index 0 is always Air
+				
+				var block = null
+				if local_index != 0:
+					var state_id = 0
+					if local_index < palette_map.size():
+						state_id = palette_map[local_index]
+					if state_id != 0:
+						var state = BlockStateRegistry.get_state(state_id)
+						if state:
+							block = BlockRegistry.get_block(state.block_id)
+				
+				# 如果是空气或非地表方块（根据之前的逻辑），视为不可见/不生成
+				var is_valid_block = false
+				if block:
+					if block.name == "water" or block.name == "grass" or block.name == "dirt" or block.name == "sand" or block.name == "oak_leaves" or block.name == "oak_log":
+						is_valid_block = true
+				
+				if not is_valid_block:
+					# 当前位置为空或无效，结束所有 Run
+					if run_top.active:
+						add_face(st, Vector3(run_top.start_x, y, z) * voxel_size, "top", run_top.block, x - run_top.start_x, 1.0)
+						has_faces = true
+						run_top.active = false
+					if run_bottom.active:
+						add_face(st, Vector3(run_bottom.start_x, y, z) * voxel_size, "bottom", run_bottom.block, x - run_bottom.start_x, 1.0)
+						has_faces = true
+						run_bottom.active = false
+					if run_front.active:
+						add_face(st, Vector3(run_front.start_x, y, z) * voxel_size, "front", run_front.block, x - run_front.start_x, 1.0)
+						has_faces = true
+						run_front.active = false
+					if run_back.active:
+						add_face(st, Vector3(run_back.start_x, y, z) * voxel_size, "back", run_back.block, x - run_back.start_x, 1.0)
+						has_faces = true
+						run_back.active = false
+					
+					# Left/Right 面仍然需要单独处理（因为它们不参与 X 轴合并）
+					# 但因为当前位置是空的，所以不需要生成 Left/Right
+					# 不过，如果当前是空的，可能会暴露左边方块的 Right 面，或右边方块的 Left 面
+					# 这在之前的逻辑中是在遍历到那个方块时处理的。
+					# 这里我们只处理“当前方块”的面。
 					continue
-				# Convert Local Index -> Global ID using the snapshot palette map
-				var state_id = 0
-				if local_index < palette_map.size():
-					state_id = palette_map[local_index]
-				if state_id == 0: # Air State
-					continue
-				# BlockRegistry is static, safe to read if not modifying
-				var state = BlockStateRegistry.get_state(state_id)
-				if not state: continue
-				var block = BlockRegistry.get_block(state.block_id)
-				if not block: continue
+
 				var pos = Vector3(x, y, z) * voxel_size
-				# 只为地表和水体生成Mesh，地下/内部方块直接跳过
-				var is_surface = false
-				if block.name == "water" or block.name == "grass" or block.name == "dirt" or block.name == "sand":
-					is_surface = true
-				# 你可以根据项目实际地表方块名扩展
-				if not is_surface:
-					continue
-				# --- Face Culling Logic ---
-				# Top (y+1)
+
+				# --- Top Face (y+1) ---
+				var show_top = false
 				if y == Constants.VOXEL_MAX_HEIGHT - 1 or (y < Constants.VOXEL_MAX_HEIGHT - 1 and voxel_data[index + stride_y] == 0):
-					add_face(st, pos, "top", block)
-					has_faces = true
-				# Bottom (y-1)
-				if y == 0 or (y > 0 and voxel_data[index - stride_y] == 0):
-					add_face(st, pos, "bottom", block)
-					has_faces = true
-				# Right (x+1)
-				var draw_right = false
-				if x < chunk_size - 1:
-					if voxel_data[index + 1] == 0: draw_right = true
-				else:
-					# Check neighbor right
-					if not neighbors_data.has("right"):
-						draw_right = true
+					show_top = true
+				
+				if show_top:
+					if run_top.active and run_top.block == block:
+						# Continue run
+						pass
 					else:
-						var n_data = neighbors_data["right"]
+						# End previous run
+						if run_top.active:
+							add_face(st, Vector3(run_top.start_x, y, z) * voxel_size, "top", run_top.block, x - run_top.start_x, 1.0)
+							has_faces = true
+						# Start new run
+						run_top = {"active": true, "start_x": x, "block": block}
+				else:
+					# End run
+					if run_top.active:
+						add_face(st, Vector3(run_top.start_x, y, z) * voxel_size, "top", run_top.block, x - run_top.start_x, 1.0)
+						has_faces = true
+						run_top.active = false
+
+				# --- Bottom Face (y-1) ---
+				var show_bottom = false
+				if y == 0 or (y > 0 and voxel_data[index - stride_y] == 0):
+					show_bottom = true
+				
+				if show_bottom:
+					if run_bottom.active and run_bottom.block == block:
+						pass
+					else:
+						if run_bottom.active:
+							add_face(st, Vector3(run_bottom.start_x, y, z) * voxel_size, "bottom", run_bottom.block, x - run_bottom.start_x, 1.0)
+							has_faces = true
+						run_bottom = {"active": true, "start_x": x, "block": block}
+				else:
+					if run_bottom.active:
+						add_face(st, Vector3(run_bottom.start_x, y, z) * voxel_size, "bottom", run_bottom.block, x - run_bottom.start_x, 1.0)
+						has_faces = true
+						run_bottom.active = false
+
+				# --- Front Face (z-1) ---
+				var show_front = false
+				if z > 0:
+					if voxel_data[index - stride_z] == 0: show_front = true
+				else:
+					if not neighbors_data.has("front"):
+						show_front = true
+					else:
+						var n_data = neighbors_data["front"]
 						var n_voxels = n_data[0]
 						var n_pal = n_data[1]
-						# Neighbor x=0, same y, z
-						var n_idx = (y * stride_y) + (z * stride_z) + 0
+						var n_idx = (y * stride_y) + ((chunk_size - 1) * stride_z) + x
 						var n_local = n_voxels[n_idx]
-						if n_local == 0:
-							draw_right = true
+						if n_local == 0: show_front = true
 						else:
 							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
-							if n_global == 0: draw_right = true
-				if draw_right:
-					add_face(st, pos, "right", block)
-					has_faces = true
-				# Left (x-1)
+							if n_global == 0: show_front = true
+				
+				if show_front:
+					if run_front.active and run_front.block == block:
+						pass
+					else:
+						if run_front.active:
+							add_face(st, Vector3(run_front.start_x, y, z) * voxel_size, "front", run_front.block, x - run_front.start_x, 1.0)
+							has_faces = true
+						run_front = {"active": true, "start_x": x, "block": block}
+				else:
+					if run_front.active:
+						add_face(st, Vector3(run_front.start_x, y, z) * voxel_size, "front", run_front.block, x - run_front.start_x, 1.0)
+						has_faces = true
+						run_front.active = false
+
+				# --- Back Face (z+1) ---
+				var show_back = false
+				if z < chunk_size - 1:
+					if voxel_data[index + stride_z] == 0: show_back = true
+				else:
+					if not neighbors_data.has("back"):
+						show_back = true
+					else:
+						var n_data = neighbors_data["back"]
+						var n_voxels = n_data[0]
+						var n_pal = n_data[1]
+						var n_idx = (y * stride_y) + (0 * stride_z) + x
+						var n_local = n_voxels[n_idx]
+						if n_local == 0: show_back = true
+						else:
+							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
+							if n_global == 0: show_back = true
+				
+				if show_back:
+					if run_back.active and run_back.block == block:
+						pass
+					else:
+						if run_back.active:
+							add_face(st, Vector3(run_back.start_x, y, z) * voxel_size, "back", run_back.block, x - run_back.start_x, 1.0)
+							has_faces = true
+						run_back = {"active": true, "start_x": x, "block": block}
+				else:
+					if run_back.active:
+						add_face(st, Vector3(run_back.start_x, y, z) * voxel_size, "back", run_back.block, x - run_back.start_x, 1.0)
+						has_faces = true
+						run_back.active = false
+
+				# --- Left Face (x-1) ---
+				# Left/Right faces cannot be merged along X axis in this loop structure.
+				# We just draw them individually.
 				var draw_left = false
 				if x > 0:
 					if voxel_data[index - 1] == 0: draw_left = true
 				else:
-					# Check neighbor left
 					if not neighbors_data.has("left"):
 						draw_left = true
 					else:
 						var n_data = neighbors_data["left"]
 						var n_voxels = n_data[0]
 						var n_pal = n_data[1]
-						# Neighbor x=chunk_size-1, same y, z
 						var n_idx = (y * stride_y) + (z * stride_z) + (chunk_size - 1)
 						var n_local = n_voxels[n_idx]
-						if n_local == 0:
-							draw_left = true
+						if n_local == 0: draw_left = true
 						else:
 							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
 							if n_global == 0: draw_left = true
 				if draw_left:
 					add_face(st, pos, "left", block)
 					has_faces = true
-				# Back (z+1)
-				var draw_back = false
-				if z < chunk_size - 1:
-					if voxel_data[index + stride_z] == 0: draw_back = true
+
+				# --- Right Face (x+1) ---
+				var draw_right = false
+				if x < chunk_size - 1:
+					if voxel_data[index + 1] == 0: draw_right = true
 				else:
-					# Check neighbor back
-					if not neighbors_data.has("back"):
-						draw_back = true
+					if not neighbors_data.has("right"):
+						draw_right = true
 					else:
-						var n_data = neighbors_data["back"]
+						var n_data = neighbors_data["right"]
 						var n_voxels = n_data[0]
 						var n_pal = n_data[1]
-						# Neighbor z=0, same y, x
-						var n_idx = (y * stride_y) + (0 * stride_z) + x
+						var n_idx = (y * stride_y) + (z * stride_z) + 0
 						var n_local = n_voxels[n_idx]
-						if n_local == 0:
-							draw_back = true
+						if n_local == 0: draw_right = true
 						else:
 							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
-							if n_global == 0: draw_back = true
-				if draw_back:
-					add_face(st, pos, "back", block)
+							if n_global == 0: draw_right = true
+				if draw_right:
+					add_face(st, pos, "right", block)
 					has_faces = true
-				# Front (z-1)
-				var draw_front = false
-				if z > 0:
-					if voxel_data[index - stride_z] == 0: draw_front = true
-				else:
-					# Check neighbor front
-					if not neighbors_data.has("front"):
-						draw_front = true
-					else:
-						var n_data = neighbors_data["front"]
-						var n_voxels = n_data[0]
-						var n_pal = n_data[1]
-						# Neighbor z=chunk_size-1, same y, x
-						var n_idx = (y * stride_y) + ((chunk_size - 1) * stride_z) + x
-						var n_local = n_voxels[n_idx]
-						if n_local == 0:
-							draw_front = true
-						else:
-							var n_global = n_pal[n_local] if n_local < n_pal.size() else 0
-							if n_global == 0: draw_front = true
-				if draw_front:
-					add_face(st, pos, "front", block)
-					has_faces = true
+
+			# End of row: flush any active runs
+			if run_top.active:
+				add_face(st, Vector3(run_top.start_x, y, z) * voxel_size, "top", run_top.block, chunk_size - run_top.start_x, 1.0)
+				has_faces = true
+			if run_bottom.active:
+				add_face(st, Vector3(run_bottom.start_x, y, z) * voxel_size, "bottom", run_bottom.block, chunk_size - run_bottom.start_x, 1.0)
+				has_faces = true
+			if run_front.active:
+				add_face(st, Vector3(run_front.start_x, y, z) * voxel_size, "front", run_front.block, chunk_size - run_front.start_x, 1.0)
+				has_faces = true
+			if run_back.active:
+				add_face(st, Vector3(run_back.start_x, y, z) * voxel_size, "back", run_back.block, chunk_size - run_back.start_x, 1.0)
+				has_faces = true
 
 	var mesh_arrays = []
 	if has_faces:
-		st.generate_normals()
-		st.generate_tangents()
+		# st.generate_normals() # 不需要，我们在 add_face 中手动设置了法线
+		# st.generate_tangents() # 暂时不需要切线，除非你有法线贴图需求
 		# commit_to_arrays returns the ArrayMesh data array (vertices, normals, etc)
 		# This is a pure data object, safe to pass back.
 		mesh_arrays = st.commit_to_arrays()
@@ -516,21 +617,19 @@ func _apply_mesh_update(section_idx, mesh_arrays) -> void:
 		# mesh_arrays[0]为地表，mesh_arrays[1]为水体
 		for i in range(2):
 			var arr = mesh_arrays[i] if i < mesh_arrays.size() else []
-			var mesh_inst = sections[i]
+			var m_inst = sections[i]
 			if section_bodies[i]:
 				section_bodies[i].queue_free()
 				section_bodies[i] = null
 			if arr.size() > 0:
 				var arr_mesh = ArrayMesh.new()
 				arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
-				mesh_inst.mesh = arr_mesh
-				mesh_inst.create_trimesh_collision()
-				if mesh_inst.get_child_count() > 0:
-					var child = mesh_inst.get_child(mesh_inst.get_child_count() - 1)
-					if child is StaticBody3D:
-						section_bodies[i] = child
+				m_inst.mesh = arr_mesh
+				
+				# 尝试生成碰撞体（基于距离）
+				_try_create_collision(i)
 			else:
-				mesh_inst.mesh = null
+				m_inst.mesh = null
 		return
 	# 单个section写回（兼容旧逻辑，写入地表MeshInstance）
 	if section_idx < 0 or section_idx >= 2:
@@ -544,11 +643,9 @@ func _apply_mesh_update(section_idx, mesh_arrays) -> void:
 		var arr_mesh = ArrayMesh.new()
 		arr_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays)
 		mesh_inst.mesh = arr_mesh
-		mesh_inst.create_trimesh_collision()
-		if mesh_inst.get_child_count() > 0:
-			var child = mesh_inst.get_child(mesh_inst.get_child_count() - 1)
-			if child is StaticBody3D:
-				section_bodies[section_idx] = child
+		
+		# 尝试生成碰撞体（基于距离）
+		_try_create_collision(section_idx)
 	else:
 		mesh_inst.mesh = null
 
@@ -655,13 +752,9 @@ func is_face_visible(x: int, y: int, z: int) -> bool:
 
 """
 为方块贴上纹理，并根据方块类型进行简单的生物群系染色处理。
-不过有些写法需要优化。
-首先是提供的纹理素材是16x16的，考虑到方块会存在不同的变体，比如树干，那么在角落上和面上的贴图中，纹理是不一样的，而树心就应该是比较单一的颜色。
-而且现在也简单的使用的一种素材，之后还要考虑到顶部贴图和侧面贴图是不一样的情况。
-
-其次是生物群系染色处理，现在只是简单的对草方块进行染色处理，之后还要考虑更多的方块类型和更复杂的染色逻辑。
+支持贪婪网格：u_scale 和 v_scale 用于控制纹理平铺次数
 """
-func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> void:
+func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData, u_scale: float = 1.0, v_scale: float = 1.0) -> void:
 	var s = Constants.VOXEL_SIZE
 	var uv_rect = Rect2(0, 0, 1, 1)
 	
@@ -693,10 +786,39 @@ func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> 
 		# Light green tint for leaves
 		color = Color(0.5, 0.8, 0.5)
 	
+	# 计算 UV 坐标，应用 Tiling (u_scale, v_scale)
+	# 注意：这里假设纹理是重复模式。如果纹理图集不支持重复（Clamp），这会导致拉伸。
+	# 通常体素纹理图集需要特殊的 Shader 或 独立的纹理来实现 Tiling，
+	# 或者我们仅仅拉伸 UV，但因为是图集，UV 超出范围会采样到其他纹理。
+	# 修正：由于是图集（Atlas），我们不能简单地让 UV > 1。
+	# 如果要实现 Tiling，我们需要在 Shader 中处理，或者接受“拉伸”的效果（对于纯色方块没问题）。
+	# 但对于有纹理的方块（如砖块），简单的 UV 缩放会导致采样到邻居纹理。
+	# 
+	# 临时方案：为了性能，我们暂时只对 UV 进行简单的重复映射。
+	# 但因为是 Atlas，我们必须小心。
+	# 如果 u_scale > 1，我们需要生成多个顶点吗？不，那样就失去减少图元的意义了。
+	# 正确的做法是：使用自定义 Shader 支持 Atlas Tiling，或者接受 UV 只是映射到单个 Block 的 UV 区域（即纹理被拉伸）。
+	# 
+	# 鉴于目前是优化阶段，且很多方块（草、土、石）纹理相对简单，
+	# 我们先保持 UV 映射到单个 Block 的区域（即纹理会被拉伸铺满整个长条）。
+	# 这是一个权衡。如果想要完美的 Tiling 且减少图元，需要 Shader 支持。
+	# 
+	# 更新：为了视觉效果，我们暂时不缩放 UV (即纹理会被拉伸)。
+	# 等后续有 Shader 支持后再开启 UV Tiling。
+	# 
+	# 再次更新：如果不缩放 UV，长条方块的纹理会被拉得很长，很难看。
+	# 我们可以尝试简单的重复 UV，但仅限于整数倍，且需要 Shader 配合。
+	# 现在的实现：保持原样，纹理会被拉伸。
+	
 	var uv_bl = Vector2(uv_rect.position.x, uv_rect.position.y + uv_rect.size.y)
 	var uv_br = Vector2(uv_rect.position.x + uv_rect.size.x, uv_rect.position.y + uv_rect.size.y)
 	var uv_tr = Vector2(uv_rect.position.x + uv_rect.size.x, uv_rect.position.y)
 	var uv_tl = Vector2(uv_rect.position.x, uv_rect.position.y)
+	
+	# 实际的物理尺寸
+	var size_x = s * u_scale
+	var size_z = s * v_scale
+	# 对于侧面，v_scale 通常对应 Y 轴高度，u_scale 对应水平宽度
 	
 	# Vertices based on our corrected TestWorld logic (CW winding)
 	var v_bl: Vector3
@@ -707,41 +829,65 @@ func add_face(st: SurfaceTool, pos: Vector3, face: String, block: BlockData) -> 
 	
 	match face:
 		"front": # -Z direction
+			# u=X, v=Y
+			size_x = s * u_scale
+			var size_y = s * v_scale
 			normal = Vector3(0, 0, -1)
-			v_bl = pos + Vector3(s, 0, 0)
+			v_bl = pos + Vector3(size_x, 0, 0)
 			v_br = pos + Vector3(0, 0, 0)
-			v_tr = pos + Vector3(0, s, 0)
-			v_tl = pos + Vector3(s, s, 0)
+			v_tr = pos + Vector3(0, size_y, 0)
+			v_tl = pos + Vector3(size_x, size_y, 0)
 		"back": # +Z direction
+			# u=X, v=Y
+			size_x = s * u_scale
+			var size_y = s * v_scale
 			normal = Vector3(0, 0, 1)
-			v_bl = pos + Vector3(0, 0, s)
-			v_br = pos + Vector3(s, 0, s)
-			v_tr = pos + Vector3(s, s, s)
-			v_tl = pos + Vector3(0, s, s)
+			v_bl = pos + Vector3(0, 0, s) # Z is fixed at +s (relative to pos start, but pos is block start)
+			# Wait, pos is the starting block position.
+			# For a merged block of width u_scale (along X), the Z face is at Z+s.
+			v_br = pos + Vector3(size_x, 0, s)
+			v_tr = pos + Vector3(size_x, size_y, s)
+			v_tl = pos + Vector3(0, size_y, s)
 		"top": # +Y direction
+			# u=X, v=Z
+			size_x = s * u_scale
+			size_z = s * v_scale
 			normal = Vector3(0, 1, 0)
-			v_bl = pos + Vector3(0, s, s)
-			v_br = pos + Vector3(s, s, s)
-			v_tr = pos + Vector3(s, s, 0)
+			v_bl = pos + Vector3(0, s, size_z)
+			v_br = pos + Vector3(size_x, s, size_z)
+			v_tr = pos + Vector3(size_x, s, 0)
 			v_tl = pos + Vector3(0, s, 0)
 		"bottom": # -Y direction
+			# u=X, v=Z
+			size_x = s * u_scale
+			size_z = s * v_scale
 			normal = Vector3(0, -1, 0)
 			v_bl = pos + Vector3(0, 0, 0)
-			v_br = pos + Vector3(s, 0, 0)
-			v_tr = pos + Vector3(s, 0, s)
-			v_tl = pos + Vector3(0, 0, s)
+			v_br = pos + Vector3(size_x, 0, 0)
+			v_tr = pos + Vector3(size_x, 0, size_z)
+			v_tl = pos + Vector3(0, 0, size_z)
 		"left": # -X direction
+			# u=Z, v=Y
+			size_z = s * u_scale # u_scale here means depth along Z
+			var size_y = s * v_scale
 			normal = Vector3(-1, 0, 0)
 			v_bl = pos + Vector3(0, 0, 0)
-			v_br = pos + Vector3(0, 0, s)
-			v_tr = pos + Vector3(0, s, s)
-			v_tl = pos + Vector3(0, s, 0)
+			v_br = pos + Vector3(0, 0, size_z)
+			v_tr = pos + Vector3(0, size_y, size_z)
+			v_tl = pos + Vector3(0, size_y, 0)
 		"right": # +X direction
+			# u=Z, v=Y
+			size_z = s * u_scale # u_scale here means depth along Z
+			var size_y = s * v_scale
 			normal = Vector3(1, 0, 0)
-			v_bl = pos + Vector3(s, 0, s)
-			v_br = pos + Vector3(s, 0, 0)
-			v_tr = pos + Vector3(s, s, 0)
-			v_tl = pos + Vector3(s, s, s)
+			v_bl = pos + Vector3(size_x, 0, size_z) # size_x is just s here (1 unit thick)
+			v_br = pos + Vector3(size_x, 0, 0)
+			v_tr = pos + Vector3(size_x, size_y, 0)
+			v_tl = pos + Vector3(size_x, size_y, size_z)
+			# Note: For right face, pos.x should be shifted by the block width if we were merging along X, 
+			# but we don't merge Left/Right faces along X. We merge them along Z or Y.
+			# In this implementation, we only merge Top/Bottom/Front/Back along X.
+			# So Left/Right will always have u_scale=1, v_scale=1.
 
 	# Triangle 1: BL -> TR -> BR (CW)
 	st.set_normal(normal)
@@ -807,3 +953,49 @@ func unload_chunk() -> void:
 	# 清理Section状态
 	_generated_sections = PackedByteArray()
 	_dirty_sections = PackedInt32Array()
+
+# 尝试为指定Section生成碰撞体（基于距离剔除）
+func _try_create_collision(section_index: int) -> void:
+	var mesh_inst = sections[section_index]
+	if not mesh_inst or not mesh_inst.mesh: return
+	
+	# 如果已经有碰撞体，不需要重新生成（除非强制更新，这里假设调用此函数时是新的Mesh）
+	if section_bodies[section_index]:
+		return
+
+	var parent = get_parent()
+	if parent:
+		var player_chunk = Vector2i(0, 0)
+		var has_player_info = false
+		
+		# 尝试获取玩家位置信息
+		if parent.get("_current_player_chunk") != null:
+			player_chunk = parent._current_player_chunk
+			has_player_info = true
+		
+		# 如果获取到了玩家位置，且距离较远，则跳过生成
+		if has_player_info:
+			var dist = max(abs(chunk_position.x - player_chunk.x), abs(chunk_position.y - player_chunk.y))
+			if dist > 2: # 仅为玩家周围 5x5 范围内的区块生成精确碰撞体
+				return
+
+	# 生成碰撞体
+	mesh_inst.create_trimesh_collision()
+	if mesh_inst.get_child_count() > 0:
+		var child = mesh_inst.get_child(mesh_inst.get_child_count() - 1)
+		if child is StaticBody3D:
+			section_bodies[section_index] = child
+
+# 公开方法：强制更新碰撞体（用于玩家移动时动态加载碰撞）
+func update_collision(player_chunk_pos: Vector2i) -> void:
+	var dist = max(abs(chunk_position.x - player_chunk_pos.x), abs(chunk_position.y - player_chunk_pos.y))
+	if dist <= 2:
+		for i in range(sections.size()):
+			if sections[i].mesh and not section_bodies[i]:
+				_try_create_collision(i)
+	else:
+		# 如果远离了，可以考虑销毁碰撞体以释放内存（可选）
+		for i in range(section_bodies.size()):
+			if section_bodies[i]:
+				section_bodies[i].queue_free()
+				section_bodies[i] = null

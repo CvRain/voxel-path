@@ -11,13 +11,17 @@ public partial class BlockSelector : MeshInstance3D
     {
         base._Ready();
         // Create a simple cube mesh for the selector
-        var mesh = new BoxMesh();
-        mesh.Size = new Vector3(1, 1, 1) * (Constants.VoxelSize + 0.02f); // Slightly larger to avoid z-fighting
+        var mesh = new BoxMesh
+        {
+            Size = new Vector3(1, 1, 1) * (Constants.VoxelSize + 0.02f) // Slightly larger to avoid z-fighting
+        };
         this.Mesh = mesh;
 
-        var material = new StandardMaterial3D();
-        material.AlbedoColor = new Color(1, 1, 1, 0.3f);
-        material.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
+        var material = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(1, 1, 1, 0.3f),
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha
+        };
         this.MaterialOverride = material;
         Hide();
     }
@@ -34,7 +38,7 @@ public partial class BlockSelector : MeshInstance3D
         var offset = (new Vector3(_brushSize, _brushSize, _brushSize) - Vector3.One) * 0.5f;
         this.GlobalPosition = (voxelIndex - offset) * Constants.VoxelSize;
     }
-    
+
     public static Vector3I WorldToVoxelIndex(Vector3 worldPos, float voxelSize)
     {
         return new Vector3I(

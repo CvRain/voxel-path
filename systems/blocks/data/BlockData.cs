@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Godot;
+using VoxelPath.systems.world_settings;
 
 namespace VoxelPath.systems.blocks.data;
 
@@ -13,31 +14,31 @@ public partial class BlockData : Resource, IBlockProperties
 {
     #region 基础信息
 
-    [ExportGroup("基础信息")]
-
-    /// <summary>方块 ID - 由 BlockRegistry 自动分配，不要手动设置</summary>
-    [Export] public int Id { get; set; }
-
+    [ExportGroup("基础信息")] 
+    [Export] public int Id { get; set; }     //方块 ID - 由 BlockRegistry 自动分配，不要手动设置
+                                             
     /// <summary>方块唯一标识符（如 "stone", "oak_log", "iron_ore"）</summary>
-    [Export] public string Name { get; set; } = string.Empty;
+    [Export]
+    public string Name { get; set; } = string.Empty;
 
     /// <summary>方块显示名称（用于 UI 显示）</summary>
-    [Export] public string DisplayName { get; set; } = string.Empty;
+    [Export]
+    public string DisplayName { get; set; } = string.Empty;
 
     /// <summary>方块描述（显示在工具提示中）</summary>
-    [Export(PropertyHint.MultilineText)] public string Description { get; set; } = string.Empty;
+    [Export(PropertyHint.MultilineText)]
+    public string Description { get; set; } = string.Empty;
 
     /// <summary>方块分类（如 "nature", "ores", "machines"）</summary>
-    [Export] public string Category { get; set; } = "misc";
+    [Export]
+    public string Category { get; set; } = "misc";
 
     #endregion
 
     #region 纹理属性
 
     [ExportGroup("纹理配置")]
-
-    // Godot 编辑器中分别导出各个面的纹理路径
-    [ExportSubgroup("漫反射贴图路径")]
+    [ExportSubgroup("漫反射贴图路径")]  // Godot 编辑器中分别导出各个面的纹理路径
     [Export] public string TextureTop { get; set; } = string.Empty;
     [Export] public string TextureBottom { get; set; } = string.Empty;
     [Export] public string TextureNorth { get; set; } = string.Empty;
@@ -45,7 +46,7 @@ public partial class BlockData : Resource, IBlockProperties
     [Export] public string TextureEast { get; set; } = string.Empty;
     [Export] public string TextureWest { get; set; } = string.Empty;
 
-    [ExportSubgroup("法线贴图路径")]
+    [ExportSubgroup("法线贴图路径")] 
     [Export] public string NormalTop { get; set; } = string.Empty;
     [Export] public string NormalBottom { get; set; } = string.Empty;
     [Export] public string NormalNorth { get; set; } = string.Empty;
@@ -103,86 +104,85 @@ public partial class BlockData : Resource, IBlockProperties
             NormalWest = value.West;
         }
     }
+
     [ExportSubgroup("视觉效果")]
+    [Export]
+    public bool IsTransparent { get; set; } //是否透明（影响渲染顺序）
 
-    /// <summary>是否透明（影响渲染顺序）</summary>
-    [Export] public bool IsTransparent { get; set; }
+    [Export(PropertyHint.Range, "0.0,1.0,0.01")]
+    public float Opacity { get; set; } = 1.0f; //透明度（0.0 完全透明 - 1.0 完全不透明）
 
-    /// <summary>透明度（0.0 完全透明 - 1.0 完全不透明）</summary>
-    [Export(PropertyHint.Range, "0.0,1.0,0.01")] public float Opacity { get; set; } = 1.0f;
+    [Export]
+    public bool IsEmissive { get; set; } //是否自发光
 
-    /// <summary>是否自发光</summary>
-    [Export] public bool IsEmissive { get; set; }
-
-    /// <summary>自发光强度（HDR 值，可以 > 1.0）</summary>
-    [Export(PropertyHint.Range, "0.0,10.0,0.1")] public float EmissionStrength { get; set; } = 1.0f;
+    [Export(PropertyHint.Range, "0.0,10.0,0.1")]
+    public float EmissionStrength { get; set; } = 1.0f; // 自发光强度（HDR 值，可以 > 1.0）
 
     #endregion
 
     #region 物理属性
 
     [ExportGroup("物理属性")]
+    [Export(PropertyHint.Range, "0.0,100.0,0.1")]
+    public float Hardness { get; set; } = 1.0f; //硬度 - 影响挖掘速度（0 = 无法破坏，如基岩）
 
-    /// <summary>硬度 - 影响挖掘速度（0 = 无法破坏，如基岩）</summary>
-    [Export(PropertyHint.Range, "0.0,100.0,0.1")] public float Hardness { get; set; } = 1.0f;
+    [Export(PropertyHint.Range, "0.0,100.0,0.1")]
+    public float Resistance { get; set; } = 1.0f; //抗爆炸性 - 影响爆炸抵抗力
 
-    /// <summary>抗爆炸性 - 影响爆炸抵抗力</summary>
-    [Export(PropertyHint.Range, "0.0,100.0,0.1")] public float Resistance { get; set; } = 1.0f;
+    [Export] public bool HasCollision { get; set; } = true;//是否有碰撞体积
 
-    /// <summary>是否有碰撞体积</summary>
-    [Export] public bool HasCollision { get; set; } = true;
-
-    /// <summary>是否为实心方块（影响光照传播、AI 寻路等）</summary>
-    [Export] public bool IsSolid { get; set; } = true;
+    [Export] public bool IsSolid { get; set; } = true; //是否为实心方块（影响光照传播、AI 寻路等）
 
     #endregion
 
     #region 交互属性
 
     [ExportGroup("交互属性")]
+    [Export] public bool CanPlace { get; set; } = true; //是否可以被玩家放置
 
-    /// <summary>是否可以被玩家放置</summary>
-    [Export] public bool CanPlace { get; set; } = true;
-
-    /// <summary>是否可以被破坏</summary>
-    [Export] public bool CanBreak { get; set; } = true;
+    [Export] public bool CanBreak { get; set; } = true; //是否可以被破坏
 
     /// <summary>
     /// 需要的工具类型（使用 int 以便在 Godot 编辑器中编辑）
-    /// 0=None, 1=Pickaxe, 2=Axe, 3=Shovel, 4=Shears, 5=Hoe, 6=Sword
+    /// -1=None(无需工具), 0=Axe, 1=Pickaxe, 2=Shovel, 3=Hammer, 4=Scissors, 5=Brush, 6=Scythe, 7=Hoe
     /// </summary>
-    [Export(PropertyHint.Enum, "None:0,Pickaxe:1,Axe:2,Shovel:3,Shears:4,Hoe:5,Sword:6")]
-    public int ToolRequiredInt { get; set; }
+    [Export(PropertyHint.Enum, "None:-1,Axe:0,Pickaxe:1,Shovel:2,Hammer:3,Scissors:4,Brush:5,Scythe:6,Hoe:7")]
+    public int ToolRequiredInt { get; set; } = -1;
 
     /// <summary>需要的工具类型（强类型访问器）</summary>
-    public ToolType ToolRequired
+    public IWorldItemCategory.ToolCategory? ToolRequired
     {
-        get => (ToolType)ToolRequiredInt;
-        set => ToolRequiredInt = (int)value;
+        get => ToolRequiredInt == -1 ? null : (IWorldItemCategory.ToolCategory)ToolRequiredInt;
+        set => ToolRequiredInt = value.HasValue ? (int)value.Value : -1;
     }
 
     /// <summary>需要的最低工具等级（0 = 任意工具）</summary>
-    [Export(PropertyHint.Range, "0,5,1")] public int MineLevel { get; set; }    /// <summary>基础挖掘时间（秒）- 实际时间会受工具和等级影响</summary>
-    [Export(PropertyHint.Range, "0.1,60.0,0.1")] public float BaseMineTime { get; set; } = 1.0f;
+    [Export(PropertyHint.Range, "0,5,1")]
+    public int MineLevel { get; set; }
+
+    /// <summary>基础挖掘时间（秒）- 实际时间会受工具和等级影响</summary>
+    [Export(PropertyHint.Range, "0.1,60.0,0.1")]
+    public float BaseMineTime { get; set; } = 1.0f;
 
     #endregion
 
     #region 方块状态
 
     [ExportGroup("方块状态系统")]
-
     /// <summary>
     /// 方块状态定义（JSON 格式）
     /// 示例：{"facing":["north","south","east","west"],"lit":[true,false]}
     /// 注意：Godot 不支持导出复杂字典，使用 JSON 字符串存储
     /// </summary>
-    [Export(PropertyHint.MultilineText)] public string StateDefinitionsJson { get; set; } = "{}";
+    [Export(PropertyHint.MultilineText)]
+    public string StateDefinitionsJson { get; set; } = "{}";
 
     /// <summary>
     /// 默认状态值（JSON 格式）
     /// 示例：{"facing":"north","lit":false}
     /// </summary>
-    [Export] public string DefaultStateJson { get; set; } = "{}";
+    [Export]
+    public string DefaultStateJson { get; set; } = "{}";
 
     /// <summary>
     /// 方块状态定义（运行时使用，从 JSON 解析）
@@ -199,13 +199,13 @@ public partial class BlockData : Resource, IBlockProperties
     #region 扩展属性
 
     [ExportGroup("扩展属性")]
-
     /// <summary>
     /// 自定义属性（JSON 格式）
     /// 用于存储模组或特殊方块的额外数据
     /// 示例：{"burnTime":200,"fuelValue":1600}
     /// </summary>
-    [Export(PropertyHint.MultilineText)] public string CustomPropertiesJson { get; set; } = "{}";
+    [Export(PropertyHint.MultilineText)]
+    public string CustomPropertiesJson { get; set; } = "{}";
 
     /// <summary>
     /// 自定义属性（运行时使用，从 JSON 解析）
@@ -276,6 +276,7 @@ public partial class BlockData : Resource, IBlockProperties
             {
                 GD.PushError($"  - {error}");
             }
+
             return false;
         }
 

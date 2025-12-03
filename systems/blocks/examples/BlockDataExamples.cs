@@ -1,5 +1,6 @@
 using Godot;
 using VoxelPath.systems.blocks.data;
+using VoxelPath.systems.world_settings;
 
 namespace VoxelPath.systems.blocks.examples;
 
@@ -26,7 +27,7 @@ public static class BlockDataExamples
         // 设置物理属性
         stone.Hardness = 1.5f;
         stone.Resistance = 6.0f;
-        stone.ToolRequired = ToolType.Pickaxe;
+        stone.ToolRequired = IWorldItemCategory.ToolCategory.Pickaxe;
         stone.MineLevel = 1; // 需要木镐及以上
 
         return stone;
@@ -50,7 +51,7 @@ public static class BlockDataExamples
         );
 
         log.Hardness = 2.0f;
-        log.ToolRequired = ToolType.Axe;
+        log.ToolRequired = IWorldItemCategory.ToolCategory.Axe;
 
         return log;
     }
@@ -82,7 +83,7 @@ public static class BlockDataExamples
             // 物理属性
             Hardness = 3.5f,
             Resistance = 3.5f,
-            ToolRequired = ToolType.Pickaxe,
+            ToolRequired = IWorldItemCategory.ToolCategory.Pickaxe,
 
             // 方块状态定义（JSON格式）
             StateDefinitionsJson = @"{
@@ -188,7 +189,7 @@ public static class BlockDataExamples
         // 泥土
         var dirt = BlockData.CreateSimple("dirt", "泥土", "res://Assets/Textures/blocks/dirt.png");
         dirt.Hardness = 0.5f;
-        dirt.ToolRequired = ToolType.Shovel;
+        dirt.ToolRequired = IWorldItemCategory.ToolCategory.Shovel;
 
         // 草方块
         var grassBlock = BlockData.CreateDirectional(
@@ -199,7 +200,7 @@ public static class BlockDataExamples
             "res://Assets/Textures/blocks/grass_side.png"
         );
         grassBlock.Hardness = 0.6f;
-        grassBlock.ToolRequired = ToolType.Shovel;
+        grassBlock.ToolRequired = IWorldItemCategory.ToolCategory.Shovel;
 
         return new[]
         {
@@ -231,7 +232,7 @@ public static class BlockDataExamples
 
         // 2. 使用高性能纹理路径访问
         var texturePaths = furnace.TexturePaths;
-        GD.Print($"北面纹理: {texturePaths.GetPath(BlockFace.North)}");
+        GD.Print($"北面纹理: {texturePaths.GetPath(WorldDirection.BaseDirection.North)}");
         GD.Print($"顶面纹理: {texturePaths.Top}");
 
         // 3. 检查物理属性

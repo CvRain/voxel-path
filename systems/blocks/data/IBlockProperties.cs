@@ -69,7 +69,7 @@ public interface IBlockProperties
     bool CanBreak { get; set; }
 
     /// <summary>需要的工具类型（如 Pickaxe, Axe, Shovel）</summary>
-    ToolType ToolRequired { get; set; }
+    IWorldItemCategory.ToolCategory? ToolRequired { get; set; }
 
     /// <summary>需要的最低工具等级（0=任意, 1=木制, 2=石制, 3=铁制, 4=钻石制）</summary>
     int MineLevel { get; set; }
@@ -101,20 +101,6 @@ public interface IBlockProperties
 }
 
 /// <summary>
-/// 工具类型枚举
-/// </summary>
-public enum ToolType
-{
-    None = 0,      // 不需要工具（如泥土、草方块）
-    Pickaxe = 1,   // 镐（石头、矿石）
-    Axe = 2,       // 斧（木头）
-    Shovel = 3,    // 铲（泥土、沙子、砂砾）
-    Shears = 4,    // 剪刀（树叶、羊毛）
-    Hoe = 5,       // 锄头（耕地）
-    Sword = 6      // 剑（蜘蛛网等）
-}
-
-/// <summary>
 /// 方块纹理路径配置结构体（高性能访问）
 /// 使用结构体而非 Dictionary，避免频繁查询开销
 /// </summary>
@@ -141,18 +127,55 @@ public struct BlockTexturePaths
     /// <summary>
     /// 获取指定方向的纹理路径
     /// </summary>
-    public readonly string GetPath(BlockFace face)
+    public readonly string GetPath(WorldDirection.BaseDirection direction)
     {
-        return face switch
+        return direction switch
         {
-            BlockFace.Top => Top ?? North,      // 如果顶面为空，使用侧面
-            BlockFace.Bottom => Bottom ?? North,
-            BlockFace.North => North,
-            BlockFace.South => South ?? North,
-            BlockFace.East => East ?? North,
-            BlockFace.West => West ?? North,
+            WorldDirection.BaseDirection.Up => Top ?? North,
+            WorldDirection.BaseDirection.Down => Bottom ?? North,
+            WorldDirection.BaseDirection.North => North,
+            WorldDirection.BaseDirection.South => South ?? North,
+            WorldDirection.BaseDirection.East => East ?? North,
+            WorldDirection.BaseDirection.West => West ?? North,
+            // 额外的方向别名支持
+            WorldDirection.BaseDirection.Back => North,
+            WorldDirection.BaseDirection.Forward => South,
+            WorldDirection.BaseDirection.Right => East,
+            WorldDirection.BaseDirection.Left => West,
             _ => North
         };
+    }
+
+    /// <summary>
+    /// 根据方向设置纹理路径
+    /// </summary>
+    public void SetPath(WorldDirection.BaseDirection direction, string path)
+    {
+        switch (direction)
+        {
+            case WorldDirection.BaseDirection.Up:
+                Top = path;
+                break;
+            case WorldDirection.BaseDirection.Down:
+                Bottom = path;
+                break;
+            case WorldDirection.BaseDirection.North:
+            case WorldDirection.BaseDirection.Back:
+                North = path;
+                break;
+            case WorldDirection.BaseDirection.South:
+            case WorldDirection.BaseDirection.Forward:
+                South = path;
+                break;
+            case WorldDirection.BaseDirection.East:
+            case WorldDirection.BaseDirection.Right:
+                East = path;
+                break;
+            case WorldDirection.BaseDirection.West:
+            case WorldDirection.BaseDirection.Left:
+                West = path;
+                break;
+        }
     }
 
     /// <summary>
@@ -172,15 +195,3 @@ public struct BlockTexturePaths
     }
 }
 
-/// <summary>
-/// 方块面枚举
-/// </summary>
-public enum BlockFace
-{
-    Top = 0,
-    Bottom = 1,
-    North = 2,
-    South = 3,
-    East = 4,
-    West = 5
-}

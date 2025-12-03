@@ -13,7 +13,11 @@ public partial class WorldDirection : Node
         North,
         South,
         Up,
-        Down
+        Down,
+        Left,
+        Right,
+        Forward,
+        Back
     }
 
     public readonly Dictionary<BaseDirection, Vector3I> DirectionVectors = new()
@@ -23,6 +27,10 @@ public partial class WorldDirection : Node
         { BaseDirection.North, Vector3I.Back },
         { BaseDirection.South, Vector3I.Forward },
         { BaseDirection.Up, Vector3I.Up },
-        { BaseDirection.Down, Vector3I.Down }
+        { BaseDirection.Down, Vector3I.Down },
+        { BaseDirection.Left, Vector3I.Left },
+        { BaseDirection.Right, Vector3I.Right },
+        { BaseDirection.Forward, Vector3I.Forward },
+        { BaseDirection.Back, Vector3I.Back }
     };
 }

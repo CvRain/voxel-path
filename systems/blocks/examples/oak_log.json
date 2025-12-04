@@ -1,0 +1,34 @@
+{
+  "name": "oak_log",
+  "display_name": "橡木原木",
+  "description": "天然的橡木原木，可用于建造和制作",
+  "category": "nature",
+
+  "textures": {
+    "top": "res://assets/textures/blocks/oak_log_top.png",
+    "bottom": "res://assets/textures/blocks/oak_log_top.png",
+    "north": "res://assets/textures/blocks/oak_log_side.png",
+    "south": "res://assets/textures/blocks/oak_log_side.png",
+    "east": "res://assets/textures/blocks/oak_log_side.png",
+    "west": "res://assets/textures/blocks/oak_log_side.png"
+  },
+
+  "is_transparent": false,
+  "opacity": 1.0,
+  "is_emissive": false,
+
+  "hardness": 2.0,
+  "resistance": 2.0,
+  "has_collision": true,
+  "is_solid": true,
+
+  "can_place": true,
+  "can_break": true,
+  "tool_required": "axe",
+  "mine_level": 0,
+  "base_mine_time": 1.0,
+
+  "state_definitions": "{\"facing\":[\"north\",\"south\",\"east\",\"west\",\"up\",\"down\"]}",
+  "default_state": "{\"facing\":\"up\"}",
+  "custom_properties": "{\"fuel_value\":300}"
+}

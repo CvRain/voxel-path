@@ -1,0 +1,33 @@
+{
+  "name": "copper_ore",
+  "display_name": "铜矿石",
+  "description": "含有铜的矿石，可以冶炼成铜锭",
+  "category": "ores",
+
+  "textures": {
+    "all": "res://assets/textures/blocks/copper_ore.png"
+  },
+
+  "normals": {
+    "all": "res://assets/textures/blocks/copper_ore_normal.png"
+  },
+
+  "is_transparent": false,
+  "opacity": 1.0,
+  "is_emissive": false,
+
+  "hardness": 3.0,
+  "resistance": 3.0,
+  "has_collision": true,
+  "is_solid": true,
+
+  "can_place": false,
+  "can_break": true,
+  "tool_required": "pickaxe",
+  "mine_level": 1,
+  "base_mine_time": 2.5,
+
+  "state_definitions": "{\"oxidation\":[\"none\",\"exposed\",\"weathered\",\"oxidized\"]}",
+  "default_state": "{\"oxidation\":\"none\"}",
+  "custom_properties": "{\"ore_type\":\"copper\",\"smelt_result\":\"copper_ingot\"}"
+}

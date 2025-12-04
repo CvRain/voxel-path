@@ -1,0 +1,22 @@
+{
+  "name": "dirt",
+  "display_name": "Dirt",
+  "category": "nature",
+  "description": "Common dirt block",
+
+  "textures": {
+    "all": "res://Assets/Textures/Natural/dirt.png"
+  },
+
+  "hardness": 0.5,
+  "resistance": 0.5,
+  "is_solid": true,
+  "is_transparent": false,
+  "has_collision": true,
+
+  "can_place": true,
+  "can_break": true,
+  "tool_required": "shovel",
+  "mine_level": 0,
+  "base_mine_time": 0.75
+}

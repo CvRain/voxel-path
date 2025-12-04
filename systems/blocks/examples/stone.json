@@ -1,0 +1,29 @@
+{
+  "name": "stone",
+  "display_name": "石头",
+  "description": "坚硬的石头，是建筑的基础材料",
+  "category": "nature",
+
+  "textures": {
+    "all": "res://assets/textures/blocks/stone.png"
+  },
+
+  "is_transparent": false,
+  "opacity": 1.0,
+  "is_emissive": false,
+
+  "hardness": 5.0,
+  "resistance": 6.0,
+  "has_collision": true,
+  "is_solid": true,
+
+  "can_place": true,
+  "can_break": true,
+  "tool_required": "pickaxe",
+  "mine_level": 0,
+  "base_mine_time": 1.5,
+
+  "state_definitions": "{}",
+  "default_state": "{}",
+  "custom_properties": "{}"
+}

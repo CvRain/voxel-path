@@ -1,0 +1,29 @@
+{
+  "name": "oak_log",
+  "display_name": "Oak Log",
+  "category": "nature",
+  "description": "Oak wood log",
+
+  "textures": {
+    "top": "res://Assets/Textures/Natural/oak_log_top.png",
+    "bottom": "res://Assets/Textures/Natural/oak_log_top.png",
+    "north": "res://Assets/Textures/Natural/oak_log.png",
+    "south": "res://Assets/Textures/Natural/oak_log.png",
+    "east": "res://Assets/Textures/Natural/oak_log.png",
+    "west": "res://Assets/Textures/Natural/oak_log.png"
+  },
+
+  "state_definitions_json": "{\"facing\": [\"north\", \"south\", \"east\", \"west\", \"up\", \"down\"]}",
+  "default_state_json": "{\"facing\": \"up\"}",
+
+  "hardness": 2.0,
+  "resistance": 2.0,
+  "is_solid": true,
+  "is_transparent": false,
+  "has_collision": true,
+
+  "can_place": true,
+  "can_break": true,
+  "tool_required": "axe",
+  "base_mine_time": 2.0
+}

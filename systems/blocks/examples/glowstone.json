@@ -1,0 +1,30 @@
+{
+  "name": "glowstone",
+  "display_name": "荧石",
+  "description": "会发光的神奇方块",
+  "category": "nature",
+
+  "textures": {
+    "all": "res://assets/textures/blocks/glowstone.png"
+  },
+
+  "is_transparent": false,
+  "opacity": 1.0,
+  "is_emissive": true,
+  "emission_strength": 2.5,
+
+  "hardness": 0.3,
+  "resistance": 0.3,
+  "has_collision": true,
+  "is_solid": true,
+
+  "can_place": true,
+  "can_break": true,
+  "tool_required": "none",
+  "mine_level": 0,
+  "base_mine_time": 0.5,
+
+  "state_definitions": "{}",
+  "default_state": "{}",
+  "custom_properties": "{\"light_color\":\"#FFCC66\"}"
+}

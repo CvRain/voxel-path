@@ -1,0 +1,22 @@
+{
+  "name": "cobblestone",
+  "display_name": "Cobblestone",
+  "category": "nature",
+  "description": "Rough cobblestone block",
+
+  "textures": {
+    "all": "res://Assets/Textures/Natural/cobblestone.png"
+  },
+
+  "hardness": 2.0,
+  "resistance": 6.0,
+  "is_solid": true,
+  "is_transparent": false,
+  "has_collision": true,
+
+  "can_place": true,
+  "can_break": true,
+  "tool_required": "pickaxe",
+  "mine_level": 1,
+  "base_mine_time": 2.0
+}

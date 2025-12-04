@@ -1,0 +1,14 @@
+{
+  "category": "nature",
+  "display_name": "Nature",
+  "priority": 10,
+  "description": "Natural blocks found in the world",
+  "version": "1.0",
+  "blocks": [
+    "stone.json",
+    "dirt.json",
+    "grass.json",
+    "cobblestone.json",
+    "oak_log.json"
+  ]
+}

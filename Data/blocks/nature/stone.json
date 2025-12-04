@@ -1,0 +1,22 @@
+{
+  "name": "stone",
+  "display_name": "Stone",
+  "category": "nature",
+  "description": "A common stone block",
+
+  "textures": {
+    "all": "res://Assets/Textures/Natural/stone.png"
+  },
+
+  "hardness": 1.5,
+  "resistance": 2.0,
+  "is_solid": true,
+  "is_transparent": false,
+  "has_collision": true,
+
+  "can_place": true,
+  "can_break": true,
+  "tool_required": "pickaxe",
+  "mine_level": 1,
+  "base_mine_time": 1.5
+}

@@ -1,0 +1,27 @@
+{
+  "name": "grass",
+  "display_name": "Grass Block",
+  "category": "nature",
+  "description": "Grass-covered dirt block",
+
+  "textures": {
+    "top": "res://Assets/Textures/Natural/grass_block.png",
+    "bottom": "res://Assets/Textures/Natural/dirt.png",
+    "north": "res://Assets/Textures/Natural/grass_block.png",
+    "south": "res://Assets/Textures/Natural/grass_block.png",
+    "east": "res://Assets/Textures/Natural/grass_block.png",
+    "west": "res://Assets/Textures/Natural/grass_block.png"
+  },
+
+  "hardness": 0.6,
+  "resistance": 0.6,
+  "is_solid": true,
+  "is_transparent": false,
+  "has_collision": true,
+
+  "can_place": true,
+  "can_break": true,
+  "tool_required": "shovel",
+  "mine_level": 0,
+  "base_mine_time": 0.9
+}

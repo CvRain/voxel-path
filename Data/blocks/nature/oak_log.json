@@ -13,8 +13,12 @@
     "west": "res://Assets/Textures/Natural/oak_log.png"
   },
 
-  "state_definitions_json": "{\"facing\": [\"north\", \"south\", \"east\", \"west\", \"up\", \"down\"]}",
-  "default_state_json": "{\"facing\": \"up\"}",
+  "state_definitions": {
+    "facing": ["north", "south", "east", "west", "up", "down"]
+  },
+  "default_state": {
+    "facing": "up"
+  },
 
   "hardness": 2.0,
   "resistance": 2.0,

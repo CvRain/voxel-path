@@ -27,7 +27,14 @@
   "mine_level": 1,
   "base_mine_time": 2.5,
 
-  "state_definitions": "{\"oxidation\":[\"none\",\"exposed\",\"weathered\",\"oxidized\"]}",
-  "default_state": "{\"oxidation\":\"none\"}",
-  "custom_properties": "{\"ore_type\":\"copper\",\"smelt_result\":\"copper_ingot\"}"
+  "state_definitions": {
+    "oxidation": ["none", "exposed", "weathered", "oxidized"]
+  },
+  "default_state": {
+    "oxidation": "none"
+  },
+  "custom_properties": {
+    "ore_type": "copper",
+    "smelt_result": "copper_ingot"
+  }
 }

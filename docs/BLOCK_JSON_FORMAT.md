@@ -62,8 +62,31 @@
     "east": "res://Assets/Textures/Natural/oak_log.png",
     "west": "res://Assets/Textures/Natural/oak_log.png"
   },
-  "state_definitions_json": "{\"facing\": [\"north\", \"south\", \"east\", \"west\", \"up\", \"down\"]}",
-  "default_state_json": "{\"facing\": \"up\"}"
+  "state_definitions": {
+    "facing": ["north", "south", "east", "west", "up", "down"]
+  },
+  "default_state": {
+    "facing": "up"
+  }
+}
+```
+
+### 带自定义属性的方块示例
+```json
+{
+  "name": "copper_ore",
+  "display_name": "铜矿石",
+  "state_definitions": {
+    "oxidation": ["none", "exposed", "weathered", "oxidized"]
+  },
+  "default_state": {
+    "oxidation": "none"
+  },
+  "custom_properties": {
+    "ore_type": "copper",
+    "smelt_result": "copper_ingot",
+    "drop_count": 1
+  }
 }
 ```
 
@@ -96,8 +119,30 @@
 - `base_mine_time` (float): 基础挖掘时间（秒）
 
 ### 方块状态（可选）
-- `state_definitions_json` (string): JSON 格式的状态定义
-- `default_state_json` (string): JSON 格式的默认状态
+- `state_definitions` (object): 状态定义，键为属性名，值为可能的值数组
+  ```json
+  {
+    "facing": ["north", "south", "east", "west", "up", "down"],
+    "lit": [true, false]
+  }
+  ```
+- `default_state` (object): 默认状态值
+  ```json
+  {
+    "facing": "up",
+    "lit": false
+  }
+  ```
+
+### 自定义属性（可选）
+- `custom_properties` (object): 自定义的键值对，用于特殊逻辑
+  ```json
+  {
+    "ore_type": "copper",
+    "smelt_result": "copper_ingot",
+    "experience": 3
+  }
+  ```
 
 ## 命名规范
 - ✅ 使用 `textures` 而非 `texture_paths`

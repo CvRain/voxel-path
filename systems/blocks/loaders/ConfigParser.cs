@@ -151,12 +151,12 @@ public class ConfigParser : IDisposable
             MineLevel = json.MineLevel,
             BaseMineTime = json.BaseMineTime,
 
-            // 方块状态
-            StateDefinitionsJson = json.StateDefinitionsJson ?? "{}",
-            DefaultStateJson = json.DefaultStateJson ?? "{}",
+            // 方块状态 - 转换为 JSON 字符串
+            StateDefinitionsJson = ConvertToJsonString(json.StateDefinitions),
+            DefaultStateJson = ConvertToJsonString(json.DefaultState),
 
-            // 自定义属性
-            CustomPropertiesJson = json.CustomPropertiesJson ?? "{}"
+            // 自定义属性 - 转换为 JSON 字符串
+            CustomPropertiesJson = ConvertToJsonString(json.CustomProperties)
         };
 
         return blockData;
@@ -209,6 +209,33 @@ public class ConfigParser : IDisposable
             return null;
 
         return Enum.TryParse<T>(value, true, out var result) ? result : null;
+    }
+
+    /// <summary>
+    /// 将 JsonElement 转换为 JSON 字符串
+    /// 支持对象、数组、字符串等所有类型
+    /// </summary>
+    private string ConvertToJsonString(JsonElement? element)
+    {
+        if (!element.HasValue)
+            return "{}";
+
+        var jsonElement = element.Value;
+
+        // 如果是字符串类型，尝试解析为 JSON（兼容旧格式）
+        if (jsonElement.ValueKind == JsonValueKind.String)
+        {
+            return jsonElement.GetString() ?? "{}";
+        }
+
+        // 如果是对象或数组，序列化为字符串
+        if (jsonElement.ValueKind == JsonValueKind.Object || jsonElement.ValueKind == JsonValueKind.Array)
+        {
+            return JsonSerializer.Serialize(jsonElement, _jsonOptions);
+        }
+
+        // 其他类型返回空对象
+        return "{}";
     }
 
     public void Dispose()
@@ -346,16 +373,16 @@ public class BlockDataJson
     [JsonPropertyName("base_mine_time")]
     public float BaseMineTime { get; set; } = 1.0f;
 
-    // 方块状态
+    // 方块状态 - 支持对象格式（推荐）和字符串格式（兼容）
     [JsonPropertyName("state_definitions")]
-    public string StateDefinitionsJson { get; set; } = "{}";
+    public JsonElement? StateDefinitions { get; set; }
 
     [JsonPropertyName("default_state")]
-    public string DefaultStateJson { get; set; } = "{}";
+    public JsonElement? DefaultState { get; set; }
 
-    // 自定义属性
+    // 自定义属性 - 支持对象格式（推荐）和字符串格式（兼容）
     [JsonPropertyName("custom_properties")]
-    public string CustomPropertiesJson { get; set; } = "{}";
+    public JsonElement? CustomProperties { get; set; }
 }
 
 /// <summary>
